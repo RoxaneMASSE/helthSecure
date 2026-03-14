@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Accueil{% endblock %}
+{% block content %}
+<div class="card" style="text-align:center;padding:3rem;">
+    <h1 style="margin-bottom:1rem;">🏥 HealthSecure</h1>
+    <p style="color:#555;margin-bottom:2rem;">Système sécurisé de dossiers médicaux.</p>
+    <a href="{% url 'oidc_authentication_init' %}" class="btn btn-primary">Se connecter</a>
+</div>
+{% endblock %}

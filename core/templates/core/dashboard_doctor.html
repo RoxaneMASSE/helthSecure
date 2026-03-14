@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Dashboard Médecin{% endblock %}
+{% block content %}
+<div class="card">
+    <h2>Bonjour Dr. {{ user.get_full_name|default:user.username }}
+        <span class="badge-doctor">Médecin</span>
+    </h2>
+</div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+    <div class="card">
+        <h3>👥 Mes patients</h3>
+        <p style="color:#888;margin:.5rem 0 1rem;">Patients qui vous sont assignés.</p>
+        <a href="#" class="btn btn-primary">Voir les patients</a>
+    </div>
+    <div class="card">
+        <h3>📁 Dossiers médicaux</h3>
+        <p style="color:#888;margin:.5rem 0 1rem;">Consulter et gérer les dossiers.</p>
+        <a href="#" class="btn btn-primary">Voir les dossiers</a>
+    </div>
+</div>
+{% endblock %}

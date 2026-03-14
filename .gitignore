@@ -1,0 +1,118 @@
+.env# Environment variables (CRITIQUE!)
+.env
+.env.local
+.env.production
+
+
+# Clés privées
+*.key
+*.pem
+*.key.pem
+*-key.pem
+*.private
+*.priv
+id_rsa
+id_dsa
+id_ecdsa
+id_ed25519
+
+
+# Certificats et PKI
+cert.key
+cert.crt
+certificate.key
+certificate.crt
+*.csr
+*.cer
+*.der
+*.p12
+*.pfx
+pki/
+trusted_cas/
+*.ca-bundle
+
+# Tokens et API keys
+*token*
+*apikey*
+*api-key*
+*secret*
+*.secret
+
+# Python
+*.pyc
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Django
+db.sqlite3
+db.sqlite3-journal
+*.log
+local_settings.py
+
+# Virtual Environment
+venv/
+env/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Media & Static
+media/
+staticfiles/
+*.sqlite3
+
+# Logs
+logs/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# --- Python ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pkl
+*.pdb
+*.egg-info/
+*.egg
+*.log
+
+# --- Environnements virtuels ---
+env/
+venv/
+.venv/
+
+# --- Django ---
+*.sqlite3
+db.sqlite3
+media/
+staticfiles/
+logs/
+*.mo
+*.pot
+
+# Fichiers sensibles (ne jamais commit)
+.env
+.env.local
+.env.prod
+secrets.json
+
+# --- Migrations compilées (
+
+# PKI - Clés privées (JAMAIS commit !)
+pki/
+*.key.pem
+*-key.pem
+
+# Trust store (géré par déploiement)
+trusted_cas/

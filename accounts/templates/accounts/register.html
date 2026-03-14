@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% block title %}Register — HealthSecure{% endblock %}
+
+{% block content %}
+<div class="card" style="max-width:560px; margin:0 auto;">
+    <h2 style="margin-bottom:1.5rem;">Create an account</h2>
+
+    <!-- Role selector tabs -->
+    <div style="display:flex; gap:.5rem; margin-bottom:1.5rem;">
+        <a href="?role=patient"
+        class="tab-btn {% if role == 'patient' %}tab-active{% endif %}">
+            Patient
+        </a>
+        <a href="?role=doctor"
+        class="tab-btn {% if role == 'doctor' %}tab-active{% endif %}">
+            Doctor
+        </a>
+    </div>
+    <!-- Non-field errors -->
+    {% if form.non_field_errors %}
+        <div style="background:#fde; padding:.75rem; border-radius:8px;
+                    margin-bottom:1rem; color:#c00;">
+            {% for error in form.non_field_errors %}
+                <p>{{ error }}</p>
+            {% endfor %}
+        </div>
+    {% endif %}
+
+    <!-- Registration form -->
+    <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+
+        <!-- Hidden role field so POST knows which form was submitted -->
+        <input type="hidden" name="role" value="{{ role }}">
+
+        {% for field in form %}
+        <div style="margin-bottom:1rem;">
+
+            <!-- Field label -->
+            <label style="display:block; font-weight:600; margin-bottom:.3rem;">
+                {{ field.label }}
+                {% if field.field.required %}
+                    <span style="color:#e63946;">*</span>
+                {% endif %}
+            </label>
+
+            <!-- Field input -->
+            {{ field }}
+
+            <!-- Field error -->
+            {% if field.errors %}
+                <p style="color:#c00; font-size:.85rem; margin-top:.3rem;">
+                    {{ field.errors.0 }}
+                </p>
+            {% endif %}
+
+            <!-- Field help text -->
+            {% if field.help_text %}
+                <p style="color:#888; font-size:.8rem; margin-top:.2rem;">
+                    {{ field.help_text }}
+                </p>
+            {% endif %}
+
+        </div>
+        {% endfor %}
+
+        <button type="submit" class="btn btn-primary"
+                style="width:100%; margin-top:.5rem; padding:.75rem;">
+            Create account
+        </button>
+    </form>
+
+    <p style="text-align:center; margin-top:1.5rem; color:#555; font-size:.9rem;">
+        Already have an account?
+        <a href="{% url 'oidc_authentication_init' %}" style="color:#457b9d;">
+            Log in
+        </a>
+    </p>
+</div>
+
+<!-- Input styling -->
+<style>
+    input[type=text],
+    input[type=email],
+    input[type=password],
+    input[type=date],
+    input[type=file],
+    select,
+    textarea {
+        width: 100%;
+        padding: .5rem .75rem;
+        border: 1px solid #ccc;
+        border-radius: 6px;
+        font-size: .95rem;
+        box-sizing: border-box;
+        font-family: inherit;
+    }
+    input:focus,
+    select:focus,
+    textarea:focus {
+        outline: none;
+        border-color: #457b9d;
+        box-shadow: 0 0 0 2px rgba(69,123,157,.15);
+    }
+.tab-btn {
+    flex: 1;
+    text-align: center;
+    padding: .6rem;
+    border-radius: 8px;
+    text-decoration: none;
+    font-weight: 600;
+    background: #eee;
+    color: #333;
+}
+.tab-active {
+    background: #457b9d;
+    color: white;
+}
+</style>
+{% endblock %}

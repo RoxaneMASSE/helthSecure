@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Mon profil{% endblock %}
+{% block content %}
+<div class="card">
+    <h2 style="margin-bottom:1.5rem;">Mon profil</h2>
+    <p><strong>Nom :</strong> {{ user.get_full_name|default:"—" }}</p>
+    <p style="margin-top:.5rem;"><strong>Email :</strong> {{ user.email|default:"—" }}</p>
+    <p style="margin-top:.5rem;"><strong>Rôle :</strong>
+        {% if profile.is_doctor %}<span class="badge-doctor">Médecin</span>
+        {% elif profile.is_patient %}<span class="badge-patient">Patient</span>
+        {% else %}—{% endif %}
+    </p>
+    <div style="margin-top:1.5rem;">
+        <a href="/" class="btn btn-primary">← Dashboard</a>
+        <a href="{% url 'oidc_logout' %}" class="btn btn-danger" style="margin-left:.5rem;">Déconnexion</a>
+    </div>
+</div>
+{% endblock %}
