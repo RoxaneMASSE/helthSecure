@@ -76,8 +76,8 @@ KEYCLOAK_ADMIN_USER     = config('KEYCLOAK_ADMIN_USER', default='admin')
 KEYCLOAK_ADMIN_PASSWORD = config('KEYCLOAK_ADMIN_PASSWORD', default='admin')
 _BASE = f"{KEYCLOAK_URL}/realms/{KEYCLOAK_REALM}/protocol/openid-connect"
 
-OIDC_RP_CLIENT_ID     = config('OIDC_RP_CLIENT_ID', default='health')
-OIDC_RP_CLIENT_SECRET = config('OIDC_RP_CLIENT_SECRET', default='')
+OIDC_RP_CLIENT_ID     = config('OIDC_RP_CLIENT_ID', default='django-health')
+OIDC_RP_CLIENT_SECRET = config('OIDC_RP_CLIENT_SECRET', default='fkXZdfIIpbBvYUofQZF5QJxKkSdr0inh')
 OIDC_RP_SIGN_ALGO     = "RS256"
 OIDC_RP_SCOPES        = "openid email profile"
 
