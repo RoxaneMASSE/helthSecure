@@ -31,33 +31,54 @@ command -v curl   >/dev/null || { echo "❌ curl manquant";   exit 1; }
 command -v openssl >/dev/null || echo "⚠️  OpenSSL non trouvé (certificats ignorés)"
 echo "✔ Outils vérifiés"
 
-# ── Déterminer Python ──────────────────────────────────
-PYTHON_CMD=""
+# ── Trouver Python système pour créer le venv ─────────
+SYS_PYTHON=""
+if command -v python &>/dev/null; then
+    SYS_PYTHON="python"
+elif command -v py &>/dev/null; then
+    SYS_PYTHON="py"
+elif [ -f "/c/python313/python.exe" ]; then
+    SYS_PYTHON="/c/python313/python"
+elif [ -f "/c/python312/python.exe" ]; then
+    SYS_PYTHON="/c/python312/python"
+fi
+
+if [ -z "$SYS_PYTHON" ]; then
+    echo "❌ Python non trouvé. Installez Python 3.x."
+    exit 1
+fi
+echo "✔ Python système : $SYS_PYTHON"
+
+# ── Créer le venv si absent ────────────────────────────
+if [ ! -d ".venv" ]; then
+    echo "Création du venv..."
+    $SYS_PYTHON -m venv .venv
+    echo "✔ Venv créé"
+else
+    echo "✔ Venv existant"
+fi
+
+# ── Pointer vers le Python du venv ────────────────────
 if [ -f ".venv/Scripts/python.exe" ]; then
     PYTHON_CMD=".venv/Scripts/python.exe"
 elif [ -f ".venv/bin/python" ]; then
     PYTHON_CMD=".venv/bin/python"
-elif [ ! -z "$VIRTUAL_ENV" ]; then
-    PYTHON_CMD="python"
 else
-    if command -v python &>/dev/null; then
-        PYTHON_CMD="python"
-    elif command -v python &>/dev/null; then
-        PYTHON_CMD="python"
-    elif command -v py &>/dev/null; then
-        PYTHON_CMD="py"
-    elif [ -f "/c/python13/python.exe" ]; then
-        PYTHON_CMD="/c/python13/python"
-    elif [ -f "/c/python12/python.exe" ]; then
-        PYTHON_CMD="/c/python12/python"
-    fi
-fi
-
-if [ -z "$PYTHON_CMD" ]; then
-    echo "❌ Python non trouvé. Créez un venv : python -m venv .venv"
+    echo "❌ Venv créé mais Python introuvable dedans"
     exit 1
 fi
-echo "✔ Python : $PYTHON_CMD"
+echo "✔ Python venv : $PYTHON_CMD"
+
+# ── Installer les dépendances dans le venv ─────────────
+echo "Installation des dépendances..."
+$PYTHON_CMD -m pip install --upgrade pip -q
+if [ -f "requirements.txt" ]; then
+    $PYTHON_CMD -m pip install -r requirements.txt -q
+    echo "✔ Dépendances installées"
+else
+    echo "⚠️  requirements.txt introuvable, installation minimale..."
+    $PYTHON_CMD -m pip install django cryptography -q
+fi
 echo ""
 
 # ── [1/7] SECRET_KEY Django ────────────────────────────
@@ -96,40 +117,58 @@ else
 fi
 
 if command -v openssl &>/dev/null; then
-    if [ -d "pki" ] && [ -f "pki/doctors/dr-test-fullchain.pem" ]; then
-        echo "✓ PKI déjà présente"
+
+    # ── CORRECTION : vérifier que les fichiers doctors existent réellement ──
+    if [ -f "pki/doctors/dr-test-fullchain.pem" ] && \
+       [ -f "pki/doctors/dr-test-cert.pem" ] && \
+       [ -f "pki/doctors/dr-test-key.pem" ] && \
+       [ -f "trusted_cas/root-ca-cert.pem" ]; then
+        echo "✓ PKI déjà présente et complète"
     else
+        echo "  Génération de la PKI complète..."
         mkdir -p pki/root-ca pki/intermediate-ca pki/doctors trusted_cas
 
+        # Root CA
         openssl genrsa -out pki/root-ca/root-ca-key.pem 4096 2>/dev/null
         openssl req -x509 -new -key pki/root-ca/root-ca-key.pem \
           -out pki/root-ca/root-ca-cert.pem -days 3650 \
-          -subj "${SUBJ_PREFIX}C=BE/O=Medical Root CA/CN=Root CA"
+          -subj "${SUBJ_PREFIX}C=BE/O=Medical Root CA/CN=Root CA" 2>/dev/null
+        echo "  ✓ Root CA"
 
+        # Intermediate CA
         openssl genrsa -out pki/intermediate-ca/int-key.pem 4096 2>/dev/null
         openssl req -new -key pki/intermediate-ca/int-key.pem \
           -out pki/intermediate-ca/int-csr.pem \
-          -subj "${SUBJ_PREFIX}C=BE/O=CHU Bruxelles/CN=CHU CA"
+          -subj "${SUBJ_PREFIX}C=BE/O=CHU Bruxelles/CN=CHU CA" 2>/dev/null
         openssl x509 -req -in pki/intermediate-ca/int-csr.pem \
           -CA pki/root-ca/root-ca-cert.pem \
           -CAkey pki/root-ca/root-ca-key.pem -CAcreateserial \
           -out pki/intermediate-ca/int-cert.pem -days 1825 2>/dev/null
+        echo "  ✓ Intermediate CA"
 
+        # Certificat Dr. Test
         openssl genrsa -out pki/doctors/dr-test-key.pem 2048 2>/dev/null
         openssl req -new -key pki/doctors/dr-test-key.pem \
           -out pki/doctors/dr-test-csr.pem \
-          -subj "${SUBJ_PREFIX}C=BE/O=CHU Bruxelles/CN=Dr. Test/emailAddress=test@chu.be"
+          -subj "${SUBJ_PREFIX}C=BE/O=CHU Bruxelles/CN=Dr. Test/emailAddress=test@chu.be" 2>/dev/null
         openssl x509 -req -in pki/doctors/dr-test-csr.pem \
           -CA pki/intermediate-ca/int-cert.pem \
           -CAkey pki/intermediate-ca/int-key.pem -CAcreateserial \
           -out pki/doctors/dr-test-cert.pem -days 365 2>/dev/null
+        echo "  ✓ Certificat Dr. Test"
 
+        # Fullchain
         cat pki/doctors/dr-test-cert.pem \
             pki/intermediate-ca/int-cert.pem \
             pki/root-ca/root-ca-cert.pem \
             > pki/doctors/dr-test-fullchain.pem
+        echo "  ✓ Fullchain généré"
 
+        # trusted_cas
         cp pki/root-ca/root-ca-cert.pem trusted_cas/
+        cp pki/intermediate-ca/int-cert.pem trusted_cas/
+        echo "  ✓ trusted_cas peuplé"
+
         echo "✓ PKI générée"
     fi
 else

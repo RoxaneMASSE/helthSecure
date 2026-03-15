@@ -6,7 +6,12 @@ from accounts.decorators import role_required
 def home(request):
     if request.user.is_authenticated:
         try:
-            role = request.user.userprofile.role
+            # Delete cached profile and reload from DB
+            if hasattr(request.user, '_userprofile_cache'):
+                del request.user._userprofile_cache
+            from accounts.models import UserProfile
+            profile = UserProfile.objects.get(user=request.user)
+            role = profile.role
             return redirect("core:dashboard_doctor" if role == "doctor" else "core:dashboard_patient")
         except Exception:
             pass

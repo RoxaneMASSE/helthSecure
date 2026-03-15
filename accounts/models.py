@@ -11,7 +11,7 @@ class UserProfile(models.Model):
     role       = models.CharField(max_length=10, choices=ROLE_CHOICES, default="patient")
     keycloak_id = models.CharField(max_length=255, blank=True, null=True, unique=True)
 
-    def __str__(self):
+    def str(self):
         return f"{self.user.get_full_name()} ({self.get_role_display()})"
 
     @property
@@ -27,8 +27,3 @@ class UserProfile(models.Model):
 def create_or_save_profile(sender, instance, created, **kwargs):
     if created:
         UserProfile.objects.get_or_create(user=instance)
-    else:
-        try:
-            instance.userprofile.save()
-        except UserProfile.DoesNotExist:
-            UserProfile.objects.create(user=instance)

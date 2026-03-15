@@ -25,7 +25,7 @@
     <div>
         {% if user.is_authenticated %}
             <a href="{% url 'accounts:profil' %}">My profile</a>
-            <a href="{% url 'oidc_logout' %}">Log out</a>
+            <a href="{% url 'accounts:logout' %}">Log out</a>
         {% else %}
             <a href="{% url 'accounts:register' %}">Register</a>
             <a href="{% url 'oidc_authentication_init' %}">Log in</a>

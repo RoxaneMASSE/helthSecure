@@ -1,0 +1,21 @@
+Manifest-Version: 1.0
+Created-By: Maven Archiver 3.4.0
+Build-Jdk-Spec: 17
+Specification-Title: Keycloak Themes
+Specification-Version: 26.5
+Specification-Vendor: JBoss by Red Hat
+Implementation-Title: Keycloak Themes
+Implementation-Version: 26.5.5
+Implementation-Vendor: JBoss by Red Hat
+Implementation-URL: http://keycloak.org/keycloak-themes
+Java-Vendor: Eclipse Adoptium
+Java-Version: 17.0.18
+Os-Arch: amd64
+Os-Name: Linux
+Os-Version: 6.14.0-1017-azure
+Scm-Connection: scm:git:git://github.com/keycloak/keycloak.git/keycloak-
+ themes
+Scm-Revision: 011adab86aafd03f092c5d3e3b0f74491afd6c3b
+Scm-Url: https://github.com/keycloak/keycloak/tree/master/keycloak-theme
+ s/
+

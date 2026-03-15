@@ -2,12 +2,16 @@ from django.shortcuts import render, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.core.exceptions import ValidationError
+from django.conf import settings
+from urllib.parse import urlencode
+from django.views.decorators.cache import never_cache
+from django_ratelimit.decorators import ratelimit
 
 from .forms import PatientRegistrationForm, DoctorRegistrationForm
 from .keycloak_client import create_keycloak_user
 from .certificate import certificate_service
 
-
+@ratelimit(key='ip', rate='5/m', method='POST', block=True)
 def register(request):
     """Single registration page with role selector."""
     role = request.GET.get("role", "patient")
@@ -76,6 +80,7 @@ def register(request):
 
 
 @login_required
+@never_cache
 def profil(request):
     try:
         profile = request.user.userprofile
@@ -86,3 +91,25 @@ def profil(request):
 
 def acces_refuse(request):
     return render(request, "accounts/acces_refuse.html", status=403)
+
+from django.contrib.auth import logout as django_logout
+
+def logout_view(request):
+    # 1. Récupérer l'ID Token avant de vider la session
+    id_token = request.session.get('oidc_id_token')
+    
+    # 2. Déconnexion de Django
+    django_logout(request)
+    
+    # 3. Construire l'URL de logout Keycloak
+    endpoint = f"{settings.KEYCLOAK_URL}/realms/{settings.KEYCLOAK_REALM}/protocol/openid-connect/logout"
+    
+    params = {
+        "client_id": settings.OIDC_RP_CLIENT_ID,
+        "post_logout_redirect_uri": "http://localhost:8000/", # Doit correspondre EXACTEMENT à Keycloak
+    }
+    
+    if id_token:
+        params["id_token_hint"] = id_token
+        
+    return redirect(f"{endpoint}?{urlencode(params)}")

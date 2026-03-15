@@ -18,7 +18,7 @@ def get_admin_token():
 def create_keycloak_user(first_name, last_name, email, password, role):
     """
     Create a user in Keycloak and assign the given role.
-    Returns the Keycloak user UUID or raises on error.
+    Returns the Keycloak user UUID or raises ValueError with a clean message.
     """
     token = get_admin_token()
     realm = settings.KEYCLOAK_REALM
@@ -42,10 +42,41 @@ def create_keycloak_user(first_name, last_name, email, password, role):
             "temporary": False,
         }],
     }
+
     resp = requests.post(f"{base}/users", json=payload, headers=headers, timeout=10)
 
     if resp.status_code == 409:
         raise ValueError("An account with this email already exists.")
+
+    if resp.status_code == 400:
+        # Lire le message d'erreur Keycloak et le traduire proprement
+        try:
+            error_data = resp.json()
+            error_msg = error_data.get("errorMessage", "")
+        except Exception:
+            error_msg = ""
+
+        # Messages Keycloak → messages lisibles
+        password_errors = {
+            "invalidPasswordMinLengthMessage":
+                "Password must be at least 12 characters long.",
+            "invalidPasswordMinDigitsMessage":
+                "Password must contain at least 1 number.",
+            "invalidPasswordMinUpperCaseMessage":
+                "Password must contain at least 1 uppercase letter.",
+            "invalidPasswordMinSpecialCharsMessage":
+                "Password must contain at least 1 special character (!@#$%...).",
+        }
+
+        if error_msg in password_errors:
+            raise ValueError(password_errors[error_msg])
+
+        # Message générique si non reconnu
+        raise ValueError(
+            "Password does not meet security requirements: "
+            "at least 12 characters, 1 uppercase, 1 number, 1 special character."
+        )
+
     resp.raise_for_status()
 
     # 2. Get user UUID from Location header

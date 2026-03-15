@@ -11,6 +11,7 @@ services:
       - "8080:8080"
     volumes:
       - keycloak_data:/opt/keycloak/data
+      - ./themes/my-theme:/opt/keycloak/themes/my-theme 
     command: start-dev
 
 volumes:

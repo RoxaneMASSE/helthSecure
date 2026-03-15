@@ -22,6 +22,7 @@ INSTALLED_APPS = [
     "mozilla_django_oidc",
     "accounts",
     "core",
+    "django_extensions",
 ]
 
 MIDDLEWARE = [
@@ -33,6 +34,7 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "mozilla_django_oidc.middleware.SessionRefresh",
+    'accounts.middleware.NoCacheMiddleware',
 ]
 
 ROOT_URLCONF = "healthproject.urls"
@@ -68,8 +70,6 @@ USE_I18N = True
 USE_TZ = True
 STATIC_URL = "static/"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
-
-
 KEYCLOAK_URL   = config('KEYCLOAK_URL', default='http://localhost:8080')
 KEYCLOAK_REALM = config('KEYCLOAK_REALM', default='health')
 KEYCLOAK_ADMIN_USER     = config('KEYCLOAK_ADMIN_USER', default='admin')
@@ -89,6 +89,7 @@ OIDC_OP_LOGOUT_ENDPOINT        = f"{_BASE}/logout"
 
 OIDC_STORE_ACCESS_TOKEN = True
 OIDC_STORE_ID_TOKEN     = True
+OIDC_OP_LOGOUT_URL_METHOD = "GET"
 OIDC_LEEWAY = datetime.timedelta(seconds=60)
 
 AUTHENTICATION_BACKENDS = [
