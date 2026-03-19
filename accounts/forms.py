@@ -1,5 +1,6 @@
 from django import forms
-
+from django_recaptcha.fields import ReCaptchaField
+from django_recaptcha.widgets import ReCaptchaV2Checkbox
 
 class PatientRegistrationForm(forms.Form):
     first_name  = forms.CharField(max_length=50, label="First name")
@@ -11,6 +12,7 @@ class PatientRegistrationForm(forms.Form):
         widget=forms.DateInput(attrs={"type": "date"}),
         label="Date of birth"
     )
+    captcha = ReCaptchaField(widget=ReCaptchaV2Checkbox, label="")
 
     def clean(self):
         cleaned = super().clean()
@@ -29,6 +31,8 @@ class DoctorRegistrationForm(forms.Form):
         widget=forms.DateInput(attrs={"type": "date"}),
         label="Date of birth"
     )
+    captcha = ReCaptchaField(widget=ReCaptchaV2Checkbox, label="")
+    
     medical_organisation = forms.CharField(max_length=100, label="Medical organisation")
     certificate = forms.FileField(
         label="Certificate chain (.pem)",

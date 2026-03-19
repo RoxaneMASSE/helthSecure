@@ -23,6 +23,7 @@ INSTALLED_APPS = [
     "accounts",
     "core",
     "django_extensions",
+    "django_recaptcha",
 ]
 
 MIDDLEWARE = [
@@ -100,3 +101,7 @@ AUTHENTICATION_BACKENDS = [
 LOGIN_REDIRECT_URL  = "/"
 LOGOUT_REDIRECT_URL = "/"
 LOGIN_URL           = "/oidc/authenticate/"
+
+RECAPTCHA_PUBLIC_KEY  = config('RECAPTCHA_PUBLIC_KEY')
+RECAPTCHA_PRIVATE_KEY = config('RECAPTCHA_PRIVATE_KEY')
+SILENCED_SYSTEM_CHECKS = ['django_recaptcha.recaptcha_test_key_error']
