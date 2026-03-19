@@ -29,7 +29,7 @@
             <a href="{% url 'accounts:logout' %}">Log out</a>
         {% else %}
             <a href="{% url 'accounts:register' %}">Register</a>
-            <a href="{% url 'oidc_authentication_init' %}">Log in</a>
+            <a href="{% url 'accounts:webauthn_login' %}">Log in</a>
         {% endif %}
     </div>
 </nav>

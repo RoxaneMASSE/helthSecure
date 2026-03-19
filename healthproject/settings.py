@@ -4,6 +4,8 @@ import datetime
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+STATIC_URL = 'static/'
+
 SECRET_KEY = config('SECRET_KEY')
 DEBUG = config('DEBUG', default=True, cast=bool)
 ALLOWED_HOSTS = config(
@@ -105,3 +107,6 @@ LOGIN_URL           = "/oidc/authenticate/"
 RECAPTCHA_PUBLIC_KEY  = config('RECAPTCHA_PUBLIC_KEY')
 RECAPTCHA_PRIVATE_KEY = config('RECAPTCHA_PRIVATE_KEY')
 SILENCED_SYSTEM_CHECKS = ['django_recaptcha.recaptcha_test_key_error']
+
+WEBAUTHN_RP_ID = config('WEBAUTHN_RP_ID', default='localhost')
+WEBAUTHN_ORIGIN = config('WEBAUTHN_ORIGIN', default='https://localhost:8000')

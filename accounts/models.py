@@ -23,6 +23,17 @@ class UserProfile(models.Model):
         return self.role == "patient"
 
 
+class WebAuthnCredential(models.Model):
+    user            = models.ForeignKey(User, on_delete=models.CASCADE, related_name="webauthn_credentials")
+    credential_id   = models.BinaryField(unique=True)
+    public_key      = models.BinaryField()
+    sign_count      = models.PositiveIntegerField(default=0)
+    created_at      = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"WebAuthn credential for {self.user.username}"
+    
+
 @receiver(post_save, sender=User)
 def create_or_save_profile(sender, instance, created, **kwargs):
     if created:

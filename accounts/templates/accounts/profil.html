@@ -1,5 +1,17 @@
 {% extends "base.html" %}
+{% load static %}
 {% block title %}My profile{% endblock %}
+
+{% block extra_head %}
+<script>
+    const CSRF_TOKEN = '{{ csrf_token }}';
+    const WEBAUTHN_REGISTER_BEGIN_URL    = "{% url 'accounts:webauthn_register_begin' %}";
+    const WEBAUTHN_REGISTER_COMPLETE_URL = "{% url 'accounts:webauthn_register_complete' %}";
+</script>
+<script src="{% static 'accounts/js/webauthn_utils.js' %}"></script>
+<script src="{% static 'accounts/js/webauthn_register.js' %}"></script>
+{% endblock %}
+
 {% block content %}
 <div class="card">
     <h2 style="margin-bottom:1.5rem;">My profile</h2>
@@ -10,6 +22,25 @@
         {% elif profile.is_patient %}<span class="badge-patient">Patient</span>
         {% else %}—{% endif %}
     </p>
+
+    <hr style="margin:1.5rem 0; border:none; border-top:1px solid #eee;">
+
+    <h3 style="margin-bottom:1rem; font-size:1rem;">WebAuthn</h3>
+    {% if has_webauthn %}
+        <p style="color:#1a7a3c; margin-bottom:1rem;">
+            ✓ A WebAuthn credential is registered on this account.
+        </p>
+    {% else %}
+        <p style="color:#888; margin-bottom:1rem;">
+            No WebAuthn credential registered yet.
+        </p>
+    {% endif %}
+
+    <button id="btn-register-webauthn" class="btn btn-primary">
+        {% if has_webauthn %}Update WebAuthn credential{% else %}Register WebAuthn{% endif %}
+    </button>
+    <div id="webauthn-status" style="margin-top:.75rem; font-size:.9rem;"></div>
+
     <div style="margin-top:1.5rem;">
         <a href="/" class="btn btn-primary">← Dashboard</a>
     </div>
