@@ -94,6 +94,8 @@ OIDC_STORE_ACCESS_TOKEN = True
 OIDC_STORE_ID_TOKEN     = True
 OIDC_OP_LOGOUT_URL_METHOD = "GET"
 OIDC_LEEWAY = datetime.timedelta(seconds=60)
+OIDC_AUTH_REQUEST_EXTRA_PARAMS = {}
+
 
 AUTHENTICATION_BACKENDS = [
     "accounts.backends.KeycloakOIDCBackend",

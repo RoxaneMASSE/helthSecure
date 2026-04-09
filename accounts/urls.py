@@ -15,5 +15,5 @@ urlpatterns = [
     path("webauthn/login/begin/",        views.webauthn_login_begin,      name="webauthn_login_begin"),
     path("webauthn/login/complete/",     views.webauthn_login_complete,   name="webauthn_login_complete"),
     path("webauthn/login/",              views.webauthn_login_page,       name="webauthn_login"),
-
+    path("webauthn/setup/", views.webauthn_register_page, name="webauthn_register_begin_page"),
 ]

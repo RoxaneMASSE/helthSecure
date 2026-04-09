@@ -17,7 +17,6 @@ from django_ratelimit.decorators import ratelimit
 
 from webauthn.helpers.structs import PublicKeyCredentialDescriptor
 
-
 import webauthn
 from webauthn.helpers.structs import (
     AuthenticatorSelectionCriteria,
@@ -58,11 +57,19 @@ def register(request):
                         first_name=form.cleaned_data["first_name"],
                         last_name=form.cleaned_data["last_name"],
                         email=form.cleaned_data["email"],
-                        password=form.cleaned_data["password"],
                         role="patient",
                     )
-                    messages.success(request, "Account created! You can now log in.")
-                    return redirect("/oidc/authenticate/")
+                    user, created = User.objects.get_or_create(
+                        username=form.cleaned_data["email"],
+                        defaults={
+                            "email": form.cleaned_data["email"],
+                            "first_name": form.cleaned_data["first_name"],
+                            "last_name": form.cleaned_data["last_name"],
+                        }
+                    )
+                    django_login(request, user, backend='django.contrib.auth.backends.ModelBackend')
+                    messages.success(request, "Account created! Now register your passkey.")
+                    return redirect("accounts:webauthn_register_begin_page")
                 except ValueError as e:
                     form.add_error(None, str(e))
                 except Exception as e:
@@ -85,15 +92,19 @@ def register(request):
                             first_name=form.cleaned_data["first_name"],
                             last_name=form.cleaned_data["last_name"],
                             email=form.cleaned_data["email"],
-                            password=form.cleaned_data["password"],
                             role="doctor",
                         )
-                        messages.success(
-                            request,
-                            f"Doctor account created for {cert_info['subject']} "
-                            f"({cert_info['organization']}). You can now log in."
+                        user, created = User.objects.get_or_create(
+                            username=form.cleaned_data["email"],
+                            defaults={
+                                "email": form.cleaned_data["email"],
+                                "first_name": form.cleaned_data["first_name"],
+                                "last_name": form.cleaned_data["last_name"],
+                            }
                         )
-                        return redirect("/oidc/authenticate/")
+                        django_login(request, user, backend='django.contrib.auth.backends.ModelBackend')
+                        messages.success(request, f"Doctor account created for {cert_info['subject']}.")
+                        return redirect("accounts:webauthn_register_begin_page")
                     except ValidationError as e:
                         form.add_error("certificate", e.message)
                     except ValueError as e:
@@ -132,7 +143,6 @@ def webauthn_register_begin(request):
         ],
     )
 
-    # Stocker le challenge en session
     request.session['webauthn_register_challenge'] = base64.b64encode(
         options.challenge
     ).decode()
@@ -189,11 +199,10 @@ def webauthn_login_begin(request):
             return JsonResponse({'error': 'Email required'}, status=400)
 
         try:
-            # Chercher par email au lieu de username
             user = User.objects.get(email__iexact=username)
         except User.DoesNotExist:
             return JsonResponse({'error': 'User not found'}, status=404)
-        
+
         credentials = WebAuthnCredential.objects.filter(user=user)
         if not credentials.exists():
             return JsonResponse({'error': 'No WebAuthn credential registered'}, status=404)
@@ -233,10 +242,7 @@ def webauthn_login_complete(request):
         body = json.loads(request.body)
         user = User.objects.get(email__iexact=username)
 
-        # Trouver le credential correspondant
-        credential_id_bytes = base64.urlsafe_b64decode(
-            body['id'] + '=='
-        )
+        credential_id_bytes = base64.urlsafe_b64decode(body['id'] + '==')
         cred = WebAuthnCredential.objects.get(
             user=user,
             credential_id=credential_id_bytes,
@@ -252,17 +258,13 @@ def webauthn_login_complete(request):
             require_user_verification=True,
         )
 
-        # Mettre à jour le sign_count (protection replay)
         cred.sign_count = verification.new_sign_count
         cred.save()
 
-        # Nettoyer la session
         del request.session['webauthn_login_challenge']
         del request.session['webauthn_login_username']
 
-        # Connecter l'utilisateur Django
-        django_login(request, user,
-                     backend='django.contrib.auth.backends.ModelBackend')
+        django_login(request, user, backend='django.contrib.auth.backends.ModelBackend')
 
         return JsonResponse({'status': 'ok', 'redirect': '/'})
 
@@ -270,8 +272,6 @@ def webauthn_login_complete(request):
         return JsonResponse({'error': 'Credential not found'}, status=404)
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=400)
-
-
 
 
 @login_required
@@ -287,24 +287,24 @@ def profil(request):
 def acces_refuse(request):
     return render(request, "accounts/acces_refuse.html", status=403)
 
+
 from django.contrib.auth import logout as django_logout
 
 def logout_view(request):
-    # 1. Récupérer l'ID Token avant de vider la session
     id_token = request.session.get('oidc_id_token')
-    
-    # 2. Déconnexion de Django
     django_logout(request)
-    
-    # 3. Construire l'URL de logout Keycloak
+
     endpoint = f"{settings.KEYCLOAK_URL}/realms/{settings.KEYCLOAK_REALM}/protocol/openid-connect/logout"
-    
     params = {
         "client_id": settings.OIDC_RP_CLIENT_ID,
-        "post_logout_redirect_uri": "http://localhost:8000/", # Doit correspondre EXACTEMENT à Keycloak
+        "post_logout_redirect_uri": "http://localhost:8000/",
     }
-    
     if id_token:
         params["id_token_hint"] = id_token
-        
+
     return redirect(f"{endpoint}?{urlencode(params)}")
+
+
+@login_required
+def webauthn_register_page(request):
+    return render(request, "accounts/webauthn_setup.html")

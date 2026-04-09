@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}Setup your Passkey{% endblock %}
+
+{% block extra_head %}
+<script>
+    const CSRF_TOKEN = '{{ csrf_token }}';
+    const WEBAUTHN_REGISTER_BEGIN_URL    = "{% url 'accounts:webauthn_register_begin' %}";
+    const WEBAUTHN_REGISTER_COMPLETE_URL = "{% url 'accounts:webauthn_register_complete' %}";
+</script>
+<script src="{% static 'accounts/js/webauthn_utils.js' %}"></script>
+<script src="{% static 'accounts/js/webauthn_register.js' %}"></script>
+{% endblock %}
+
+{% block content %}
+<div class="card" style="max-width:480px; margin:0 auto; text-align:center;">
+    <h2 style="margin-bottom:1rem;">🔐 Setup your Passkey</h2>
+    <p style="color:#555; margin-bottom:2rem;">
+        Your account is created. Now register your passkey to log in securely — 
+        no password needed.
+    </p>
+    <button id="btn-register-webauthn" class="btn btn-primary" 
+            style="width:100%; padding:.75rem;">
+        Register Passkey
+    </button>
+    <div id="webauthn-status" style="margin-top:1rem; font-size:.9rem;"></div>
+</div>
+{% endblock %}

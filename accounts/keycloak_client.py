@@ -15,7 +15,7 @@ def get_admin_token():
     return resp.json()["access_token"]
 
 
-def create_keycloak_user(first_name, last_name, email, password, role):
+def create_keycloak_user(first_name, last_name, email, role):
     """
     Create a user in Keycloak and assign the given role.
     Returns the Keycloak user UUID or raises ValueError with a clean message.
@@ -30,17 +30,14 @@ def create_keycloak_user(first_name, last_name, email, password, role):
 
     # 1. Create user
     payload = {
-        "username": email,
-        "email": email,
-        "firstName": first_name,
-        "lastName": last_name,
-        "enabled": True,
-        "emailVerified": True,
-        "credentials": [{
-            "type": "password",
-            "value": password,
-            "temporary": False,
-        }],
+    "username": email,
+    "email": email,
+    "firstName": first_name,
+    "lastName": last_name,
+    "enabled": True,
+    "emailVerified": True,
+    # ← plus de "credentials" du tout
+    "requiredActions": ["webauthn-register-passwordless"],
     }
 
     resp = requests.post(f"{base}/users", json=payload, headers=headers, timeout=10)

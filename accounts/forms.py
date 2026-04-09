@@ -6,8 +6,7 @@ class PatientRegistrationForm(forms.Form):
     first_name  = forms.CharField(max_length=50, label="First name")
     last_name   = forms.CharField(max_length=50, label="Last name")
     email       = forms.EmailField(label="Email")
-    password    = forms.CharField(widget=forms.PasswordInput, label="Password", min_length=8)
-    confirm_password = forms.CharField(widget=forms.PasswordInput, label="Confirm password")
+    
     date_of_birth = forms.DateField(
         widget=forms.DateInput(attrs={"type": "date"}),
         label="Date of birth"
@@ -25,8 +24,7 @@ class DoctorRegistrationForm(forms.Form):
     first_name   = forms.CharField(max_length=50, label="First name")
     last_name    = forms.CharField(max_length=50, label="Last name")
     email        = forms.EmailField(label="Email")
-    password     = forms.CharField(widget=forms.PasswordInput, label="Password", min_length=8)
-    confirm_password = forms.CharField(widget=forms.PasswordInput, label="Confirm password")
+    
     date_of_birth = forms.DateField(
         widget=forms.DateInput(attrs={"type": "date"}),
         label="Date of birth"

@@ -40,6 +40,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (result.status === 'ok') {
                 status.textContent = '✓ WebAuthn registered successfully!';
                 status.style.color = '#1a7a3c';
+                setTimeout(() => { window.location.href = '/'; }, 1000); 
+
             } else {
                 status.textContent = '✗ ' + (result.error || 'Registration failed.');
                 status.style.color = '#c00';

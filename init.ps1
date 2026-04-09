@@ -212,6 +212,47 @@ $secretResp   = Invoke-RestMethod -Uri "$KC_URL/admin/realms/$REALM/clients/$CLI
 $CLIENT_SECRET = $secretResp.value
 Write-Host "✔ Secret client récupéré" -ForegroundColor Green
 
+# ── Configuration reCAPTCHA et thème ──────────────────
+Write-Host ""
+Write-Host "Configuration reCAPTCHA + thème login..." -ForegroundColor Cyan
+
+# 1. Créer le flow "registration captcha" s'il n'existe pas
+$flows = Invoke-RestMethod -Uri "$KC_URL/admin/realms/$REALM/authentication/flows" -Headers $headers
+$captchaFlow = $flows | Where-Object { $_.alias -eq "registration captcha" }
+if (-not $captchaFlow) {
+    Invoke-RestMethod -Method Post `
+      -Uri "$KC_URL/admin/realms/$REALM/authentication/flows/registration/copy" `
+      -Headers $headers `
+      -Body '{"newName": "registration captcha"}' | Out-Null
+    Write-Host "✔ Flow 'registration captcha' créé" -ForegroundColor Green
+} else {
+    Write-Host "✔ Flow 'registration captcha' existe déjà" -ForegroundColor Green
+}
+
+# 2. Tout configurer en un seul appel : registration, flow, thème, CSP
+$realmUpdate = @{
+    registrationAllowed   = $true
+    registrationFlow      = "registration captcha"
+    loginTheme            = "my-theme"
+    browserSecurityHeaders = @{
+        contentSecurityPolicy = "frame-src 'self' https://www.google.com https://www.gstatic.com; frame-ancestors 'self'; object-src 'none';"
+        xFrameOptions         = "SAMEORIGIN"
+    }
+} | ConvertTo-Json -Depth 5
+
+try {
+    Invoke-RestMethod -Method Put -Uri "$KC_URL/admin/realms/$REALM" `
+      -Headers $headers -Body $realmUpdate | Out-Null
+    Write-Host "✔ User Registration activé" -ForegroundColor Green
+    Write-Host "✔ Flow 'registration captcha' bindé" -ForegroundColor Green
+    Write-Host "✔ Thème 'my-theme' activé" -ForegroundColor Green
+    Write-Host "✔ CSP configuré" -ForegroundColor Green
+} catch {
+    Write-Host "⚠️  Configuration realm échouée : $_" -ForegroundColor Yellow
+}
+
+Write-Host "✔ Configuration reCAPTCHA terminée" -ForegroundColor Green
+
 # ── [7/7] Génération .env ─────────────────────────────
 Write-Host "[7/7] Génération .env..."
 

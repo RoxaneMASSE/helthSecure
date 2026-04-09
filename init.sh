@@ -109,7 +109,6 @@ echo "✓ Généré"
 # ── [4/7] PKI (certificats médecins) ──────────────────
 echo "[4/7] Génération PKI..."
 
-# Détecter l'OS pour OpenSSL
 if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" ]]; then
     SUBJ_PREFIX="//"
 else
@@ -117,8 +116,6 @@ else
 fi
 
 if command -v openssl &>/dev/null; then
-
-    # ── CORRECTION : vérifier que les fichiers doctors existent réellement ──
     if [ -f "pki/doctors/dr-test-fullchain.pem" ] && \
        [ -f "pki/doctors/dr-test-cert.pem" ] && \
        [ -f "pki/doctors/dr-test-key.pem" ] && \
@@ -128,14 +125,12 @@ if command -v openssl &>/dev/null; then
         echo "  Génération de la PKI complète..."
         mkdir -p pki/root-ca pki/intermediate-ca pki/doctors trusted_cas
 
-        # Root CA
         openssl genrsa -out pki/root-ca/root-ca-key.pem 4096 2>/dev/null
         openssl req -x509 -new -key pki/root-ca/root-ca-key.pem \
           -out pki/root-ca/root-ca-cert.pem -days 3650 \
           -subj "${SUBJ_PREFIX}C=BE/O=Medical Root CA/CN=Root CA" 2>/dev/null
         echo "  ✓ Root CA"
 
-        # Intermediate CA
         openssl genrsa -out pki/intermediate-ca/int-key.pem 4096 2>/dev/null
         openssl req -new -key pki/intermediate-ca/int-key.pem \
           -out pki/intermediate-ca/int-csr.pem \
@@ -146,7 +141,6 @@ if command -v openssl &>/dev/null; then
           -out pki/intermediate-ca/int-cert.pem -days 1825 2>/dev/null
         echo "  ✓ Intermediate CA"
 
-        # Certificat Dr. Test
         openssl genrsa -out pki/doctors/dr-test-key.pem 2048 2>/dev/null
         openssl req -new -key pki/doctors/dr-test-key.pem \
           -out pki/doctors/dr-test-csr.pem \
@@ -157,18 +151,15 @@ if command -v openssl &>/dev/null; then
           -out pki/doctors/dr-test-cert.pem -days 365 2>/dev/null
         echo "  ✓ Certificat Dr. Test"
 
-        # Fullchain
         cat pki/doctors/dr-test-cert.pem \
             pki/intermediate-ca/int-cert.pem \
             pki/root-ca/root-ca-cert.pem \
             > pki/doctors/dr-test-fullchain.pem
         echo "  ✓ Fullchain généré"
 
-        # trusted_cas
         cp pki/root-ca/root-ca-cert.pem trusted_cas/
         cp pki/intermediate-ca/int-cert.pem trusted_cas/
         echo "  ✓ trusted_cas peuplé"
-
         echo "✓ PKI générée"
     fi
 else
@@ -236,7 +227,7 @@ for ROLE in doctor patient; do
     echo "✔ Rôle '$ROLE' créé"
 done
 
-# Création client OIDC (seulement s'il n'existe pas)
+# Création client OIDC
 CLIENT_EXISTS=$(curl -s \
   -H "Authorization: Bearer $TOKEN" \
   "${KC_URL}/admin/realms/${REALM}/clients?clientId=${CLIENT_ID}" \
@@ -245,7 +236,7 @@ CLIENT_EXISTS=$(curl -s \
 if [ "$CLIENT_EXISTS" = "True" ]; then
     echo "✔ Client '${CLIENT_ID}' existe déjà"
 else
-    CREATE_RESP=$(curl -s -X POST "${KC_URL}/admin/realms/${REALM}/clients" \
+    curl -s -X POST "${KC_URL}/admin/realms/${REALM}/clients" \
       -H "Authorization: Bearer $TOKEN" \
       -H "Content-Type: application/json" \
       -d "{
@@ -262,7 +253,7 @@ else
           \"http://localhost:8000\",
           \"http://127.0.0.1:8000\"
         ]
-      }")
+      }" >/dev/null
     echo "✔ Client OIDC '${CLIENT_ID}' créé"
 fi
 
@@ -284,6 +275,47 @@ CLIENT_SECRET=$(curl -s \
   "${KC_URL}/admin/realms/${REALM}/clients/${CLIENT_UUID}/client-secret" \
   | $PYTHON_CMD -c "import sys,json; print(json.load(sys.stdin)['value'])")
 echo "✔ Secret client récupéré"
+
+# ── Configuration reCAPTCHA et thème ──────────────────
+echo ""
+echo "Configuration reCAPTCHA + thème login..."
+
+# 1. Créer le flow "registration captcha" s'il n'existe pas
+FLOW_EXISTS=$(curl -s \
+  -H "Authorization: Bearer $TOKEN" \
+  "${KC_URL}/admin/realms/${REALM}/authentication/flows" \
+  | $PYTHON_CMD -c "import sys,json; flows=json.load(sys.stdin); print(any(f['alias']=='registration captcha' for f in flows))")
+
+if [ "$FLOW_EXISTS" = "True" ]; then
+    echo "✔ Flow 'registration captcha' existe déjà"
+else
+    curl -s -X POST "${KC_URL}/admin/realms/${REALM}/authentication/flows/registration/copy" \
+      -H "Authorization: Bearer $TOKEN" \
+      -H "Content-Type: application/json" \
+      -d '{"newName": "registration captcha"}' >/dev/null
+    echo "✔ Flow 'registration captcha' créé"
+fi
+
+# 2. Tout configurer en un seul appel : registration, flow, thème, CSP
+curl -s -X PUT "${KC_URL}/admin/realms/${REALM}" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "registrationAllowed": true,
+    "registrationFlow": "registration captcha",
+    "loginTheme": "my-theme",
+    "browserSecurityHeaders": {
+      "contentSecurityPolicy": "frame-src '"'"'self'"'"' https://www.google.com https://www.gstatic.com; frame-ancestors '"'"'self'"'"'; object-src '"'"'none'"'"';",
+      "xFrameOptions": "SAMEORIGIN"
+    }
+  }' >/dev/null && \
+  echo "✔ User Registration activé" && \
+  echo "✔ Flow 'registration captcha' bindé" && \
+  echo "✔ Thème 'my-theme' activé" && \
+  echo "✔ CSP configuré" || \
+  echo "⚠️  Configuration realm échouée (à faire manuellement dans Keycloak)"
+
+echo "✔ Configuration reCAPTCHA terminée"
 
 # ── [7/7] Génération .env ─────────────────────────────
 echo "[7/7] Génération .env..."
