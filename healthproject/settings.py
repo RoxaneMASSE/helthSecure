@@ -108,5 +108,3 @@ RECAPTCHA_PUBLIC_KEY  = config('RECAPTCHA_PUBLIC_KEY')
 RECAPTCHA_PRIVATE_KEY = config('RECAPTCHA_PRIVATE_KEY')
 SILENCED_SYSTEM_CHECKS = ['django_recaptcha.recaptcha_test_key_error']
 
-WEBAUTHN_RP_ID = config('WEBAUTHN_RP_ID', default='localhost')
-WEBAUTHN_ORIGIN = config('WEBAUTHN_ORIGIN', default='https://localhost:8000')
