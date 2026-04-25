@@ -10,12 +10,17 @@
     <div class="card">
         <h3>📋 My medical records</h3>
         <p style="color:#888;margin:.5rem 0 1rem;">Check medical files</p>
-        <a href="#" class="btn btn-primary">Check medical records</a>
+        <a href="{% url 'core:medical_files' %}" class="btn btn-primary">Check medical records</a>
     </div>
     <div class="card">
         <h3>👨‍⚕️ My doctors</h3>
-        <p style="color:#888;margin:.5rem 0 1rem;">Managed assigned doctors</p>
-        <a href="#" class="btn btn-primary">Manage</a>
+        <p style="color:#888;margin:.5rem 0 1rem;">
+            Manage assigned doctors
+            {% if pending_requests_count > 0 %}
+                ({{ pending_requests_count }} demande{{ pending_requests_count|pluralize }} en attente)
+            {% endif %}
+        </p>
+        <a href="{% url 'core:my_doctors' %}" class="btn btn-primary">Manage</a>
     </div>
 </div>
 {% endblock %}

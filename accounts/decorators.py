@@ -13,10 +13,13 @@ def role_required(*roles):
             if not request.user.is_authenticated:
                 return redirect("/oidc/authenticate/")
             try:
-                if request.user.userprofile.role in roles:
+                user_role = request.user.userprofile.role
+                if user_role in roles:
                     return view_func(request, *args, **kwargs)
-            except Exception:
-                pass
+            except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"Role check failed for user {request.user}: {e}")
             return redirect("accounts:acces_refuse")
         return wrapper
     return decorator

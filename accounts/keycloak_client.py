@@ -2,8 +2,9 @@ import requests
 from django.conf import settings
 
 def get_admin_token():
-    """Récupère le token admin pour gérer Keycloak."""
-    url = f"{settings.KEYCLOAK_URL}/realms/master/protocol/openid-connect/token"
+    """Récupère le token admin pour gérer Keycloak.
+    Utilise KEYCLOAK_INTERNAL_URL pour bypasser Nginx (port 8180 direct)."""
+    url = f"{settings.KEYCLOAK_INTERNAL_URL}/realms/master/protocol/openid-connect/token"
     resp = requests.post(url, data={
         "grant_type": "password",
         "client_id": "admin-cli",
@@ -14,10 +15,11 @@ def get_admin_token():
     return resp.json()["access_token"]
 
 def create_keycloak_user(first_name, last_name, email, role):
-    """Crée un utilisateur SANS mot de passe (WebAuthn ready)."""
+    """Crée un utilisateur SANS mot de passe (WebAuthn ready).
+    Utilise KEYCLOAK_INTERNAL_URL pour bypasser Nginx (port 8180 direct)."""
     token = get_admin_token()
     realm = settings.KEYCLOAK_REALM
-    base = f"{settings.KEYCLOAK_URL}/admin/realms/{realm}"
+    base = f"{settings.KEYCLOAK_INTERNAL_URL}/admin/realms/{realm}"
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",

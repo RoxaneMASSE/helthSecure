@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}Mes patients{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>Mes patients <span class="badge-doctor">Doctor</span></h2>
+</div>
+
+<div class="card">
+    <h3>Demander a suivre un patient</h3>
+    <p style="color:#888;margin:.5rem 0 1rem;">Rechercher par nom d'utilisateur</p>
+    <input id="patient-search" type="text" placeholder="Ex: patient01" style="width:100%;padding:.6rem;border:1px solid #ddd;border-radius:8px;">
+    <div id="patient-results" style="margin-top:1rem;"></div>
+</div>
+
+<div class="card">
+    <h3>Mes patients suivis</h3>
+    {% if patients %}
+        <ul style="list-style:none;padding:0;">
+            {% for patient in patients %}
+                <li style="padding:.8rem 0;border-bottom:1px solid #f0f0f0;display:flex;justify-content:space-between;align-items:center;gap:1rem;">
+                    <span>{{ patient.user.email|default:patient.user.username }}</span>
+                    <a href="{% url 'core:doctor_patient_files' patient.user.id %}" class="btn btn-primary" style="font-size:.85rem;padding:.4rem .9rem;">
+                        Voir fichiers
+                    </a>
+                </li>
+            {% endfor %}
+        </ul>
+    {% else %}
+        <p style="color:#888;">Aucun patient associe.</p>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h3>Demandes envoyees</h3>
+    {% if sent_requests %}
+        <ul style="list-style:none;padding:0;">
+            {% for req in sent_requests %}
+                <li style="padding:.8rem 0;border-bottom:1px solid #f0f0f0;display:flex;justify-content:space-between;align-items:center;gap:1rem;">
+                    <span>{{ req.patient.email|default:req.patient.username }}</span>
+                    <span>
+                        {% if req.status == 'pending' %}
+                            En attente
+                        {% elif req.status == 'approved' %}
+                            Approuvee
+                        {% else %}
+                            Rejetee
+                        {% endif %}
+                    </span>
+                </li>
+            {% endfor %}
+        </ul>
+    {% else %}
+        <p style="color:#888;">Aucune demande envoyee.</p>
+    {% endif %}
+</div>
+
+<script>
+    const patientSearchInput = document.getElementById('patient-search');
+    const patientResultsContainer = document.getElementById('patient-results');
+
+    function renderPatientResults(results) {
+        if (!results.length) {
+            patientResultsContainer.innerHTML = '<p style="color:#888;">Aucun patient trouve.</p>';
+            return;
+        }
+        patientResultsContainer.innerHTML = results.map((patient) => `
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:.6rem 0;border-bottom:1px solid #f0f0f0;">
+                <div><strong>${patient.email || patient.username}</strong></div>
+                <form method="post" action="{% url 'core:request_patient' %}">
+                    {% csrf_token %}
+                    <input type="hidden" name="patient_id" value="${patient.id}">
+                    <button type="submit" class="btn btn-primary">Demander</button>
+                </form>
+            </div>
+        `).join('');
+    }
+
+    let patientDebounceTimer;
+    patientSearchInput.addEventListener('input', () => {
+        const q = patientSearchInput.value.trim();
+        clearTimeout(patientDebounceTimer);
+        if (q.length < 2) {
+            patientResultsContainer.innerHTML = '';
+            return;
+        }
+        patientDebounceTimer = setTimeout(async () => {
+            try {
+                const response = await fetch(`{% url 'core:search_patients' %}?q=${encodeURIComponent(q)}`);
+                const data = await response.json();
+                renderPatientResults(data.results || []);
+            } catch (error) {
+                patientResultsContainer.innerHTML = '<p style="color:#a00;">Erreur de recherche.</p>';
+            }
+        }, 250);
+    });
+</script>
+{% endblock %}

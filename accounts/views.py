@@ -29,6 +29,7 @@ from webauthn.helpers.cose import COSEAlgorithmIdentifier
 from .forms import PatientRegistrationForm, DoctorRegistrationForm
 from .keycloak_client import create_keycloak_user
 from .certificate import certificate_service
+from .models import UserProfile
 
 
 
@@ -91,7 +92,7 @@ def register(request):
                             f"Doctor account created for {cert_info['subject']} "
                             f"({cert_info['organization']}). You can now log in."
                         )
-                        return render(request, 'accounts/acces_refuse.html', {'message': 'Compte créé, veuillez vous connecter.'})
+                        return redirect("/oidc/authenticate/")
                     except ValidationError as e:
                         form.add_error("certificate", e.message)
                     except ValueError as e:
@@ -145,3 +146,91 @@ def logout_view(request):
         params["id_token_hint"] = id_token
         
     return redirect(f"{endpoint}?{urlencode(params)}")
+
+
+# ── Gestion des clés RSA E2E ──────────────────────────────────────────────────
+
+@login_required
+@never_cache
+def setup_keys(request):
+    """Page de génération des clés RSA (premier login, aucune clé configurée)."""
+    try:
+        profile = request.user.userprofile
+        # Si les clés sont déjà configurées, retour au flux normal
+        if profile.public_key:
+            return redirect("/")
+    except Exception:
+        pass
+    return render(request, "accounts/setup_keys.html")
+
+
+@login_required
+@never_cache
+def unlock_keys(request):
+    """Page de déverrouillage des clés RSA (logins suivants)."""
+    try:
+        profile = request.user.userprofile
+        # Si aucune clé configurée, rediriger vers setup
+        if not profile.public_key:
+            return redirect("accounts:setup_keys")
+    except Exception:
+        return redirect("accounts:setup_keys")
+    return render(request, "accounts/unlock_keys.html")
+
+
+@login_required
+@require_POST
+def api_store_keys(request):
+    """API: stocke les clés RSA chiffrées dans UserProfile (génération initiale)."""
+    try:
+        data = json.loads(request.body)
+    except (json.JSONDecodeError, ValueError):
+        return JsonResponse({"success": False, "error": "Requête invalide."}, status=400)
+
+    public_key = data.get("public_key", "").strip()
+    encrypted_private_key = data.get("encrypted_private_key", "").strip()
+    key_salt = data.get("key_salt", "").strip()
+    key_iv = data.get("key_iv", "").strip()
+
+    if not all([public_key, encrypted_private_key, key_salt, key_iv]):
+        return JsonResponse({"success": False, "error": "Données manquantes."}, status=400)
+
+    try:
+        profile, _ = UserProfile.objects.get_or_create(user=request.user)
+        profile.public_key = public_key
+        profile.encrypted_private_key = encrypted_private_key
+        profile.key_salt = key_salt
+        profile.key_iv = key_iv
+        profile.save(update_fields=["public_key", "encrypted_private_key", "key_salt", "key_iv"])
+        # Marquer les clés comme déverrouillées pour cette session
+        request.session["keys_unlocked"] = True
+        return JsonResponse({"success": True})
+    except Exception:
+        return JsonResponse({"success": False, "error": "Erreur lors du stockage."}, status=500)
+
+
+@login_required
+def api_get_keys(request):
+    """API: retourne les données chiffrées pour le déverrouillage côté client."""
+    if request.method != "GET":
+        return JsonResponse({"success": False, "error": "Méthode non autorisée."}, status=405)
+    try:
+        profile = request.user.userprofile
+        if not profile.encrypted_private_key:
+            return JsonResponse({"success": False, "error": "Aucune clé configurée."}, status=404)
+        return JsonResponse({
+            "success": True,
+            "encrypted_private_key": profile.encrypted_private_key,
+            "key_salt": profile.key_salt,
+            "key_iv": profile.key_iv,
+        })
+    except Exception:
+        return JsonResponse({"success": False, "error": "Profil introuvable."}, status=404)
+
+
+@login_required
+@require_POST
+def api_mark_unlocked(request):
+    """API: marque les clés comme déverrouillées pour la session courante."""
+    request.session["keys_unlocked"] = True
+    return JsonResponse({"success": True})

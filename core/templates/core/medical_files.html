@@ -1,0 +1,548 @@
+{% extends "base.html" %}
+{% block title %}Mes fichiers medicaux{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>Mes fichiers medicaux <span class="badge-patient">Patient</span></h2>
+</div>
+
+<div id="zone-erreur" class="alert alert-error" style="display:none;"></div>
+<div id="zone-succes" class="alert alert-success" style="display:none;"></div>
+
+<!-- Section upload -->
+<div class="card">
+    <h3>Uploader un fichier medical</h3>
+    <p style="color:#888;margin:.4rem 0 1rem;font-size:.9rem;">
+        Le fichier est chiffre dans votre navigateur avant envoi. Max 10 MB.
+    </p>
+    <form id="form-upload" autocomplete="off">
+        {% csrf_token %}
+        <div style="margin-bottom:1rem;">
+            <label style="display:block;font-weight:600;margin-bottom:.4rem;">Fichier</label>
+            <input type="file" id="input-fichier" required
+                style="width:100%;padding:.5rem;border:1px solid #ddd;border-radius:8px;">
+        </div>
+        <div style="margin-bottom:1.2rem;">
+            <label style="display:block;font-weight:600;margin-bottom:.4rem;">Date du document</label>
+            <input type="date" id="input-date" required
+                style="width:100%;padding:.6rem .8rem;border:1px solid #ddd;border-radius:8px;font-size:1rem;">
+        </div>
+        <button type="submit" class="btn btn-primary" id="btn-upload">Chiffrer et envoyer</button>
+        <span id="upload-spinner" style="display:none;color:#457b9d;margin-left:1rem;font-size:.9rem;">
+            Chiffrement et envoi en cours...
+        </span>
+    </form>
+</div>
+
+<!-- Liste des fichiers -->
+<div class="card">
+    <h3>Mes fichiers</h3>
+    <div id="zone-chargement" style="color:#888;padding:.5rem 0;">Dechiffrement en cours...</div>
+    <div id="fichiers-liste" style="display:none;"></div>
+</div>
+
+<script>
+(function () {
+    'use strict';
+
+    // Donnees injectees par Django (tableau JSON de fichiers chiffres)
+    const filesData = {{ files_data_json|safe }};
+    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+
+    // Cache en memoire: {id -> {filename, aesKey}}
+    const decryptedCache = new Map();
+
+    // ── Utilitaires base64 <-> ArrayBuffer ────────────────────────────────────
+
+    function base64ToBuffer(b64) {
+        const bin = atob(b64);
+        const buf = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+        return buf.buffer;
+    }
+
+    function bufferToBase64(buffer) {
+        const bytes = new Uint8Array(buffer);
+        let bin = '';
+        for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+        return btoa(bin);
+    }
+
+    // ── Fonctions crypto ──────────────────────────────────────────────────────
+
+    // Importe la cle privee RSA-OAEP depuis un base64 PKCS8
+    async function importerClePrivee(b64) {
+        return crypto.subtle.importKey(
+            'pkcs8',
+            base64ToBuffer(b64),
+            { name: 'RSA-OAEP', hash: 'SHA-256' },
+            false,
+            ['decrypt']
+        );
+    }
+
+    // Importe une cle publique RSA-OAEP depuis un base64 SPKI
+    async function importerClePublique(b64) {
+        return crypto.subtle.importKey(
+            'spki',
+            base64ToBuffer(b64),
+            { name: 'RSA-OAEP', hash: 'SHA-256' },
+            false,
+            ['encrypt']
+        );
+    }
+
+    // Genere une cle AES-256-GCM aleatoire
+    async function genererCleAES() {
+        return crypto.subtle.generateKey(
+            { name: 'AES-GCM', length: 256 },
+            true,
+            ['encrypt', 'decrypt']
+        );
+    }
+
+    // Exporte une cle AES comme ArrayBuffer brut
+    async function exporterCleAES(cleAes) {
+        return crypto.subtle.exportKey('raw', cleAes);
+    }
+
+    // Importe des octets bruts comme cle AES-256-GCM
+    async function importerCleAES(rawBuffer) {
+        return crypto.subtle.importKey(
+            'raw',
+            rawBuffer,
+            { name: 'AES-GCM', length: 256 },
+            false,
+            ['encrypt', 'decrypt']
+        );
+    }
+
+    // Chiffre des donnees avec AES-GCM; retourne base64(IV || ciphertext)
+    async function aesChiffrer(cleAes, donnees) {
+        const iv = crypto.getRandomValues(new Uint8Array(12));
+        const ciphertext = await crypto.subtle.encrypt(
+            { name: 'AES-GCM', iv: iv },
+            cleAes,
+            donnees
+        );
+        // Concatener IV (12 octets) + ciphertext
+        const resultat = new Uint8Array(12 + ciphertext.byteLength);
+        resultat.set(iv, 0);
+        resultat.set(new Uint8Array(ciphertext), 12);
+        return bufferToBase64(resultat.buffer);
+    }
+
+    // Dechiffre un base64(IV || ciphertext) avec AES-GCM; retourne ArrayBuffer
+    async function aesDechiffrer(cleAes, b64IvCiphertext) {
+        const buf = base64ToBuffer(b64IvCiphertext);
+        const iv = new Uint8Array(buf, 0, 12);
+        const ciphertext = new Uint8Array(buf, 12);
+        return crypto.subtle.decrypt(
+            { name: 'AES-GCM', iv: iv },
+            cleAes,
+            ciphertext
+        );
+    }
+
+    // Chiffre les octets de la cle AES avec RSA-OAEP (cle publique)
+    async function rsaChiffrerCleAES(clePublique, aesKeyBuffer) {
+        const ciphertext = await crypto.subtle.encrypt(
+            { name: 'RSA-OAEP' },
+            clePublique,
+            aesKeyBuffer
+        );
+        return bufferToBase64(ciphertext);
+    }
+
+    // Dechiffre un base64 de cle AES avec RSA-OAEP (cle privee)
+    async function rsaDechiffrerCleAES(clePrivee, encryptedKeyB64) {
+        return crypto.subtle.decrypt(
+            { name: 'RSA-OAEP' },
+            clePrivee,
+            base64ToBuffer(encryptedKeyB64)
+        );
+    }
+
+    // ── Affichage des erreurs/succes ──────────────────────────────────────────
+
+    function afficherErreur(msg) {
+        const z = document.getElementById('zone-erreur');
+        z.textContent = msg;
+        z.style.display = 'block';
+        setTimeout(() => { z.style.display = 'none'; }, 6000);
+    }
+
+    function afficherSucces(msg) {
+        const z = document.getElementById('zone-succes');
+        z.textContent = msg;
+        z.style.display = 'block';
+        setTimeout(() => { z.style.display = 'none'; }, 4000);
+    }
+
+    // ── Rendu de la liste des fichiers ────────────────────────────────────────
+
+    function renderFichierRow(fileId, filename, date, requiresApproval, approved) {
+        // Fichier en attente d'approbation : boutons Approuver/Rejeter uniquement
+        if (requiresApproval && !approved) {
+            return `
+        <div id="file-row-${fileId}" style="display:flex;justify-content:space-between;align-items:center;padding:.8rem 0;border-bottom:1px solid #f0f0f0;gap:1rem;flex-wrap:wrap;">
+            <div>
+                <strong class="file-name">${escapeHtml(filename)}</strong>
+                <span style="color:#9a6700;background:#fff7e6;padding:.15rem .5rem;border-radius:8px;font-size:.8rem;margin-left:.5rem;">En attente d'approbation</span><br>
+                <span class="file-date" style="color:#888;font-size:.85rem;">${escapeHtml(date)}</span>
+            </div>
+            <div style="display:flex;gap:.5rem;flex-shrink:0;">
+                <button class="btn btn-approve" data-file-id="${fileId}" style="font-size:.85rem;padding:.45rem 1rem;background:#2d6a4f;color:#fff;border:none;border-radius:8px;cursor:pointer;">
+                    Approuver
+                </button>
+                <button class="btn btn-reject" data-file-id="${fileId}" style="font-size:.85rem;padding:.45rem 1rem;background:#c0392b;color:#fff;border:none;border-radius:8px;cursor:pointer;">
+                    Rejeter
+                </button>
+            </div>
+        </div>`;
+        }
+        // Fichier normal (approuve ou ne necessitant pas d'approbation) : Telecharger + Supprimer
+        return `
+        <div id="file-row-${fileId}" style="display:flex;justify-content:space-between;align-items:center;padding:.8rem 0;border-bottom:1px solid #f0f0f0;gap:1rem;flex-wrap:wrap;">
+            <div>
+                <strong class="file-name">${escapeHtml(filename)}</strong><br>
+                <span class="file-date" style="color:#888;font-size:.85rem;">${escapeHtml(date)}</span>
+            </div>
+            <div style="display:flex;gap:.5rem;flex-shrink:0;">
+                <button class="btn btn-primary btn-download" data-file-id="${fileId}" style="font-size:.85rem;padding:.45rem 1rem;">
+                    Telecharger
+                </button>
+                <button class="btn btn-danger btn-delete" data-file-id="${fileId}" style="font-size:.85rem;padding:.45rem 1rem;">
+                    Supprimer
+                </button>
+            </div>
+        </div>`;
+    }
+
+    function escapeHtml(str) {
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+
+    // ── Chargement initial: dechiffrement des metadonnees ─────────────────────
+
+    async function chargerFichiers() {
+        const zoneChargement = document.getElementById('zone-chargement');
+        const fichiersListe = document.getElementById('fichiers-liste');
+
+        if (filesData.length === 0) {
+            zoneChargement.textContent = 'Aucun fichier medical.';
+            zoneChargement.style.color = '#888';
+            return;
+        }
+
+        // Recupere la cle privee RSA depuis sessionStorage
+        const privateKeyB64 = sessionStorage.getItem('privateKeyPkcs8B64');
+        if (!privateKeyB64) {
+            zoneChargement.textContent = 'Cle privee non disponible. Veuillez vous deconnecter et vous reconnecter.';
+            zoneChargement.style.color = '#a00';
+            return;
+        }
+
+        let privateKey;
+        try {
+            privateKey = await importerClePrivee(privateKeyB64);
+        } catch (e) {
+            zoneChargement.textContent = 'Erreur lors du chargement de la cle privee.';
+            zoneChargement.style.color = '#a00';
+            return;
+        }
+
+        const decoder = new TextDecoder();
+        const lignes = [];
+
+        for (const file of filesData) {
+            if (!file.encrypted_aes_key) {
+                // Pas de cle de partage: acces refuse a ce fichier
+                lignes.push(`<div style="color:#a00;padding:.5rem 0;">[Fichier #${file.id}: cle de partage introuvable]</div>`);
+                continue;
+            }
+            try {
+                // Dechiffrer la cle AES avec la cle privee RSA
+                const aesKeyBuffer = await rsaDechiffrerCleAES(privateKey, file.encrypted_aes_key);
+                const aesKey = await importerCleAES(aesKeyBuffer);
+
+                // Dechiffrer le nom de fichier (base64(IV||ciphertext))
+                const filenameBuffer = await aesDechiffrer(aesKey, file.encrypted_filename);
+                const filename = decoder.decode(filenameBuffer);
+
+                // Dechiffrer la date
+                const dateBuffer = await aesDechiffrer(aesKey, file.encrypted_date);
+                const date = decoder.decode(dateBuffer);
+
+                // Stocker dans le cache pour le telechargement
+                decryptedCache.set(file.id, { filename, aesKey });
+
+                lignes.push(renderFichierRow(file.id, filename, date, file.requires_approval, file.approved));
+            } catch (e) {
+                lignes.push(`<div style="color:#a00;padding:.5rem 0;">[Fichier #${file.id}: erreur de dechiffrement]</div>`);
+            }
+        }
+
+        zoneChargement.style.display = 'none';
+        fichiersListe.innerHTML = lignes.join('') || '<p style="color:#888;">Aucun fichier accessible.</p>';
+        fichiersListe.style.display = 'block';
+    }
+
+    // ── Telechargement ────────────────────────────────────────────────────────
+
+    async function telechargerFichier(fileId) {
+        try {
+            // Recuperer le fichier chiffre depuis le serveur
+            const resp = await fetch(`{% url 'core:download_file' 0 %}`.replace('/0/', `/${fileId}/`));
+            if (!resp.ok) {
+                const err = await resp.json();
+                afficherErreur(err.error || 'Erreur lors du telechargement.');
+                return;
+            }
+            const data = await resp.json();
+
+            // Recuperer la cle AES depuis le cache ou la dechiffrer
+            let aesKey = decryptedCache.get(fileId)?.aesKey;
+            let filename = decryptedCache.get(fileId)?.filename || `fichier_${fileId}`;
+
+            if (!aesKey) {
+                const privateKeyB64 = sessionStorage.getItem('privateKeyPkcs8B64');
+                if (!privateKeyB64) {
+                    afficherErreur('Cle privee non disponible. Veuillez vous reconnecter.');
+                    return;
+                }
+                const privateKey = await importerClePrivee(privateKeyB64);
+                const aesKeyBuffer = await rsaDechiffrerCleAES(privateKey, data.encrypted_aes_key);
+                aesKey = await importerCleAES(aesKeyBuffer);
+                // Dechiffrer aussi le nom de fichier
+                const decoder = new TextDecoder();
+                const fnBuf = await aesDechiffrer(aesKey, data.encrypted_filename);
+                filename = decoder.decode(fnBuf);
+            }
+
+            // Dechiffrer le contenu du fichier (IV separe dans file_iv)
+            const fileIv = new Uint8Array(base64ToBuffer(data.file_iv));
+            const encryptedBytes = base64ToBuffer(data.encrypted_file);
+            const plaintextBuffer = await crypto.subtle.decrypt(
+                { name: 'AES-GCM', iv: fileIv },
+                aesKey,
+                encryptedBytes
+            );
+
+            // Declencher le telechargement via un lien temporaire
+            const blob = new Blob([plaintextBuffer]);
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+        } catch (e) {
+            afficherErreur('Erreur lors du dechiffrement du fichier.');
+            console.error('Telechargement:', e);
+        }
+    }
+
+    // ── Approbation / Rejet d'un fichier medecin ──────────────────────────────
+
+    async function approuverFichier(fileId) {
+        try {
+            const resp = await fetch(`{% url 'core:approve_file' 0 %}`.replace('/0/', `/${fileId}/`), {
+                method: 'POST',
+                headers: { 'X-CSRFToken': csrfToken, 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: 'action=approve',
+            });
+            const data = await resp.json();
+            if (data.success) {
+                afficherSucces('Fichier approuve. Vous pouvez maintenant le telecharger.');
+                // Recharger la page pour mettre a jour la liste
+                setTimeout(() => window.location.reload(), 1200);
+            } else {
+                afficherErreur(data.error || 'Erreur lors de l\'approbation.');
+            }
+        } catch (e) {
+            afficherErreur('Erreur lors de l\'approbation.');
+        }
+    }
+
+    async function rejeterFichier(fileId) {
+        if (!confirm('Rejeter ce fichier ? Il sera definitvement supprime.')) return;
+        try {
+            const resp = await fetch(`{% url 'core:approve_file' 0 %}`.replace('/0/', `/${fileId}/`), {
+                method: 'POST',
+                headers: { 'X-CSRFToken': csrfToken, 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: 'action=reject',
+            });
+            const data = await resp.json();
+            if (data.success) {
+                const row = document.getElementById(`file-row-${fileId}`);
+                if (row) row.remove();
+                decryptedCache.delete(fileId);
+                afficherSucces('Fichier rejete et supprime.');
+                const liste = document.getElementById('fichiers-liste');
+                if (liste && !liste.querySelector('[id^="file-row-"]')) {
+                    liste.innerHTML = '<p style="color:#888;">Aucun fichier medical.</p>';
+                }
+            } else {
+                afficherErreur(data.error || 'Erreur lors du rejet.');
+            }
+        } catch (e) {
+            afficherErreur('Erreur lors du rejet.');
+        }
+    }
+
+    // ── Suppression ───────────────────────────────────────────────────────────
+
+    async function supprimerFichier(fileId) {
+        if (!confirm('Supprimer ce fichier definitivement ? Cette action est irreversible.')) return;
+        try {
+            const resp = await fetch(`{% url 'core:delete_file' 0 %}`.replace('/0/', `/${fileId}/`), {
+                method: 'POST',
+                headers: { 'X-CSRFToken': csrfToken, 'Content-Type': 'application/json' },
+                body: '{}',
+            });
+            const data = await resp.json();
+            if (data.success) {
+                const row = document.getElementById(`file-row-${fileId}`);
+                if (row) row.remove();
+                decryptedCache.delete(fileId);
+                afficherSucces('Fichier supprime avec succes.');
+                const liste = document.getElementById('fichiers-liste');
+                if (liste && !liste.querySelector('[id^="file-row-"]')) {
+                    liste.innerHTML = '<p style="color:#888;">Aucun fichier medical.</p>';
+                }
+            } else {
+                afficherErreur(data.error || 'Erreur lors de la suppression.');
+            }
+        } catch (e) {
+            afficherErreur('Erreur lors de la suppression.');
+        }
+    }
+
+    // ── Delegation des clics (telecharger / supprimer / approuver / rejeter) ──
+
+    document.getElementById('fichiers-liste').addEventListener('click', function (e) {
+        const btn = e.target.closest('button');
+        if (!btn) return;
+        const fileId = parseInt(btn.dataset.fileId, 10);
+        if (btn.classList.contains('btn-download')) telechargerFichier(fileId);
+        if (btn.classList.contains('btn-delete'))   supprimerFichier(fileId);
+        if (btn.classList.contains('btn-approve'))  approuverFichier(fileId);
+        if (btn.classList.contains('btn-reject'))   rejeterFichier(fileId);
+    });
+
+    // ── Upload ────────────────────────────────────────────────────────────────
+
+    document.getElementById('form-upload').addEventListener('submit', async function (e) {
+        e.preventDefault();
+        const inputFichier = document.getElementById('input-fichier');
+        const inputDate = document.getElementById('input-date');
+        const btnUpload = document.getElementById('btn-upload');
+        const spinner = document.getElementById('upload-spinner');
+
+        const fichier = inputFichier.files[0];
+        const dateStr = inputDate.value;
+
+        if (!fichier) { afficherErreur('Veuillez selectionner un fichier.'); return; }
+        if (fichier.size > 10 * 1024 * 1024) { afficherErreur('Fichier trop volumineux (max 10 MB).'); return; }
+        if (!dateStr) { afficherErreur('Veuillez indiquer une date.'); return; }
+
+        btnUpload.disabled = true;
+        spinner.style.display = 'inline';
+
+        try {
+            // Lire le fichier comme ArrayBuffer
+            const fileBuffer = await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = reject;
+                reader.readAsArrayBuffer(fichier);
+            });
+
+            // Generer une cle AES-256 aleatoire pour ce fichier
+            const aesKey = await genererCleAES();
+            const aesKeyBuffer = await exporterCleAES(aesKey);
+
+            // Chiffrer le fichier avec un IV aleatoire separe
+            const fileIv = crypto.getRandomValues(new Uint8Array(12));
+            const encryptedFile = await crypto.subtle.encrypt(
+                { name: 'AES-GCM', iv: fileIv },
+                aesKey,
+                fileBuffer
+            );
+
+            // Chiffrer le nom du fichier (base64(IV||ciphertext))
+            const encoder = new TextEncoder();
+            const encryptedFilename = await aesChiffrer(aesKey, encoder.encode(fichier.name));
+
+            // Chiffrer la date
+            const encryptedDate = await aesChiffrer(aesKey, encoder.encode(dateStr));
+
+            // Recuperer les cles publiques du patient et de ses medecins
+            const respKeys = await fetch("{% url 'core:api_patient_doctors_keys' %}");
+            if (!respKeys.ok) throw new Error('Impossible de recuperer les cles publiques.');
+            const keysData = await respKeys.json();
+
+            // Construire la liste de tous les destinataires (patient + medecins)
+            const destinataires = [];
+            if (keysData.patient && keysData.patient.public_key) {
+                destinataires.push(keysData.patient);
+            }
+            for (const doc of (keysData.doctors || [])) {
+                destinataires.push(doc);
+            }
+
+            if (destinataires.length === 0) throw new Error('Aucune cle publique disponible.');
+
+            // Chiffrer la cle AES pour chaque destinataire avec sa cle publique RSA-OAEP
+            const keyShares = [];
+            for (const dest of destinataires) {
+                const pubKey = await importerClePublique(dest.public_key);
+                const encryptedAesKey = await rsaChiffrerCleAES(pubKey, aesKeyBuffer);
+                keyShares.push({ user_id: dest.user_id, encrypted_aes_key: encryptedAesKey });
+            }
+
+            // Envoyer les donnees chiffrees au serveur
+            const payload = {
+                encrypted_file: bufferToBase64(encryptedFile),
+                encrypted_filename: encryptedFilename,
+                encrypted_date: encryptedDate,
+                file_iv: bufferToBase64(fileIv.buffer),
+                key_shares: keyShares,
+            };
+
+            const respUpload = await fetch("{% url 'core:upload_file' %}", {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+                body: JSON.stringify(payload),
+            });
+            const result = await respUpload.json();
+            if (result.success) {
+                afficherSucces('Fichier chiffre et envoye avec succes.');
+                inputFichier.value = '';
+                inputDate.value = '';
+                // Recharger la page pour afficher le nouveau fichier
+                setTimeout(() => window.location.reload(), 1200);
+            } else {
+                afficherErreur(result.error || 'Erreur lors de l\'upload.');
+            }
+        } catch (err) {
+            afficherErreur('Erreur lors du chiffrement ou de l\'envoi : ' + err.message);
+            console.error('Upload:', err);
+        } finally {
+            btnUpload.disabled = false;
+            spinner.style.display = 'none';
+        }
+    });
+
+    // ── Initialisation au chargement de la page ───────────────────────────────
+    chargerFichiers();
+})();
+</script>
+{% endblock %}

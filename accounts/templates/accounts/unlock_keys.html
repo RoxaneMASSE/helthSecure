@@ -1,0 +1,230 @@
+{% extends "base.html" %}
+{% block title %}Déverrouiller vos clés{% endblock %}
+
+{% block content %}
+<div class="card" style="max-width:480px; margin:3rem auto;">
+    <h2 style="margin-bottom:.5rem;">🔓 Déverrouiller vos clés</h2>
+    <p style="color:#555; margin-bottom:1.5rem; font-size:.95rem;">
+        Entrez votre passphrase pour déchiffrer votre clé privée.
+        Elle sera conservée uniquement en mémoire de cet onglet.
+    </p>
+
+    <div id="zone-erreur" class="alert alert-error" style="display:none;"></div>
+    <div id="zone-succes" class="alert alert-success" style="display:none;"></div>
+
+    <form id="form-unlock" autocomplete="off">
+        {% csrf_token %}
+        <div style="margin-bottom:1.5rem;">
+            <label for="passphrase" style="display:block; font-weight:600; margin-bottom:.4rem;">
+                Passphrase
+            </label>
+            <input
+                type="password"
+                id="passphrase"
+                name="passphrase"
+                required
+                autocomplete="current-password"
+                style="width:100%; padding:.6rem .8rem; border:1px solid #ccc; border-radius:8px; font-size:1rem;"
+                placeholder="Votre passphrase"
+            >
+        </div>
+        <button type="submit" class="btn btn-primary" id="btn-deverrouiller" style="width:100%; padding:.75rem;">
+            Déverrouiller
+        </button>
+    </form>
+
+    <!-- Spinner affiché pendant le déchiffrement -->
+    <div id="zone-chargement" style="display:none; text-align:center; margin-top:1.5rem;">
+        <div style="
+            width:40px; height:40px; border:4px solid #d0e4f0;
+            border-top-color:#457b9d; border-radius:50%;
+            animation:spin .8s linear infinite; margin:0 auto 1rem;
+        "></div>
+        <p style="color:#457b9d; font-weight:600;">Vérification en cours…</p>
+    </div>
+</div>
+
+<style>
+    @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+
+<script>
+(function () {
+    'use strict';
+
+    // ── Utilitaires de conversion ──────────────────────────────────────────────
+
+    /**
+     * Convertit une chaîne base64 en ArrayBuffer.
+     */
+    function base64VersBuffer(b64) {
+        const binaire = atob(b64);
+        const octets = new Uint8Array(binaire.length);
+        for (let i = 0; i < binaire.length; i++) {
+            octets[i] = binaire.charCodeAt(i);
+        }
+        return octets.buffer;
+    }
+
+    /**
+     * Convertit un ArrayBuffer en chaîne base64.
+     */
+    function bufferVersBase64(buffer) {
+        const octets = new Uint8Array(buffer);
+        let binaire = '';
+        for (let i = 0; i < octets.length; i++) {
+            binaire += String.fromCharCode(octets[i]);
+        }
+        return btoa(binaire);
+    }
+
+    // ── Déchiffrement de la clé privée ────────────────────────────────────────
+
+    /**
+     * Dérive la clé AES depuis la passphrase et le sel (PBKDF2),
+     * puis déchiffre la clé privée RSA (AES-GCM).
+     * Lance une exception si la passphrase est incorrecte.
+     */
+    async function deverrouillerClePrivee(passphrase, clePriveeChiffreeB64, selB64, ivB64) {
+        // Décoder les données en ArrayBuffer
+        const clePriveeChiffree = base64VersBuffer(clePriveeChiffreeB64);
+        const sel = base64VersBuffer(selB64);
+        const iv  = base64VersBuffer(ivB64);
+
+        // Importer la passphrase comme matériel de clé PBKDF2
+        const encoder = new TextEncoder();
+        const materielCle = await crypto.subtle.importKey(
+            'raw',
+            encoder.encode(passphrase),
+            { name: 'PBKDF2' },
+            false,
+            ['deriveKey']
+        );
+
+        // Dériver la clé AES-256-GCM via PBKDF2 (100 000 itérations, SHA-256)
+        const cleAes = await crypto.subtle.deriveKey(
+            {
+                name: 'PBKDF2',
+                salt: sel,
+                iterations: 100000,
+                hash: 'SHA-256',
+            },
+            materielCle,
+            { name: 'AES-GCM', length: 256 },
+            false,
+            ['decrypt']
+        );
+
+        // Déchiffrer la clé privée RSA avec AES-GCM
+        // Lance une DOMException si la passphrase est incorrecte (authenticité échoue)
+        const clePriveePkcs8 = await crypto.subtle.decrypt(
+            { name: 'AES-GCM', iv: iv },
+            cleAes,
+            clePriveeChiffree
+        );
+
+        // Retourner la clé privée en base64 pour stockage en sessionStorage
+        return bufferVersBase64(clePriveePkcs8);
+    }
+
+    // ── Gestionnaire du formulaire ─────────────────────────────────────────────
+
+    const form           = document.getElementById('form-unlock');
+    const zoneErreur     = document.getElementById('zone-erreur');
+    const zoneSucces     = document.getElementById('zone-succes');
+    const zoneChargement = document.getElementById('zone-chargement');
+    const btnDev         = document.getElementById('btn-deverrouiller');
+    const csrfToken      = document.querySelector('[name=csrfmiddlewaretoken]').value;
+
+    function afficherErreur(message) {
+        zoneErreur.textContent = message;
+        zoneErreur.style.display = 'block';
+        zoneSucces.style.display = 'none';
+        zoneChargement.style.display = 'none';
+        btnDev.disabled = false;
+    }
+
+    form.addEventListener('submit', async function (e) {
+        e.preventDefault();
+        zoneErreur.style.display = 'none';
+        zoneSucces.style.display = 'none';
+
+        const passphrase = document.getElementById('passphrase').value;
+        if (!passphrase) {
+            afficherErreur('Veuillez entrer votre passphrase.');
+            return;
+        }
+
+        // Afficher le spinner
+        btnDev.disabled = true;
+        zoneChargement.style.display = 'block';
+
+        try {
+            // Récupérer les données chiffrées depuis le serveur
+            const reponseGet = await fetch("{% url 'accounts:api_get_keys' %}", {
+                method: 'GET',
+                headers: { 'Accept': 'application/json' },
+            });
+
+            if (!reponseGet.ok) {
+                afficherErreur('Impossible de récupérer les clés. Veuillez vous reconnecter.');
+                return;
+            }
+
+            const donneesChiffrees = await reponseGet.json();
+            if (!donneesChiffrees.success) {
+                afficherErreur('Aucune clé configurée. Veuillez contacter le support.');
+                return;
+            }
+
+            // Déchiffrer la clé privée côté client (jamais envoyée au serveur)
+            let clePriveeB64;
+            try {
+                clePriveeB64 = await deverrouillerClePrivee(
+                    passphrase,
+                    donneesChiffrees.encrypted_private_key,
+                    donneesChiffrees.key_salt,
+                    donneesChiffrees.key_iv
+                );
+            } catch (_erreurDechiffrement) {
+                // Ne pas révéler de détails sur l'erreur de déchiffrement
+                afficherErreur('Passphrase incorrecte. Veuillez réessayer.');
+                return;
+            }
+
+            // Stocker la clé privée déchiffrée en sessionStorage
+            // (disparaît automatiquement à la fermeture de l'onglet)
+            sessionStorage.setItem('privateKeyPkcs8B64', clePriveeB64);
+
+            // Marquer la session comme déverrouillée côté serveur
+            const reponsePost = await fetch("{% url 'accounts:api_mark_unlocked' %}", {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken,
+                },
+                body: JSON.stringify({}),
+            });
+
+            if (!reponsePost.ok) {
+                afficherErreur('Erreur de session. Veuillez vous reconnecter.');
+                return;
+            }
+
+            // Afficher un message de succès bref puis rediriger
+            zoneChargement.style.display = 'none';
+            zoneSucces.textContent = 'Clés déverrouillées. Redirection…';
+            zoneSucces.style.display = 'block';
+
+            setTimeout(function () {
+                window.location.href = '/';
+            }, 600);
+
+        } catch (erreur) {
+            afficherErreur('Une erreur inattendue est survenue. Veuillez réessayer.');
+            console.error('Erreur déverrouillage:', erreur);
+        }
+    });
+})();
+</script>
+{% endblock %}

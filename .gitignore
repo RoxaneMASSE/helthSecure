@@ -116,3 +116,7 @@ pki/
 
 # Trust store (géré par déploiement)
 trusted_cas/
+
+# AI assistant (pas lié au projet)
+.agents/
+.verdent/

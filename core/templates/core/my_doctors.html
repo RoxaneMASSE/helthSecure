@@ -1,0 +1,336 @@
+{% extends "base.html" %}
+{% block title %}Mes medecins{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>Mes medecins <span class="badge-patient">Patient</span></h2>
+</div>
+
+<div class="card">
+    <h3>Ajouter un medecin</h3>
+    <p style="color:#888;margin:.5rem 0 1rem;">Rechercher par nom ou prenom</p>
+    <input id="doctor-search" type="text" placeholder="Ex: Dupont" style="width:100%;padding:.6rem;border:1px solid #ddd;border-radius:8px;">
+    <div id="doctor-results" style="margin-top:1rem;"></div>
+</div>
+
+<div class="card">
+    <h3>Demandes en attente</h3>
+    {% if pending_requests %}
+        <ul style="list-style:none;padding:0;">
+            {% for req in pending_requests %}
+                <li style="padding:.8rem 0;border-bottom:1px solid #f0f0f0;display:flex;justify-content:space-between;align-items:center;gap:1rem;">
+                    <div>
+                        {% if req.doctor.doctor_profile %}
+                            Dr. {{ req.doctor.doctor_profile.first_name }} {{ req.doctor.doctor_profile.last_name }} - {{ req.doctor.doctor_profile.organization }}
+                        {% else %}
+                            {{ req.doctor.username }}
+                        {% endif %}
+                    </div>
+                    <div style="display:flex;gap:.5rem;">
+                        {# Bouton Approuver : declenche le re-chiffrement via JS avant le POST #}
+                        <form method="post"
+                              action="{% url 'core:handle_request' req.id 'approve' %}"
+                              class="reencrypt-approve-form"
+                              data-doctor-id="{{ req.doctor.id }}">
+                            {% csrf_token %}
+                            <button class="btn btn-primary" type="submit">Approuver</button>
+                        </form>
+                        <form method="post" action="{% url 'core:handle_request' req.id 'reject' %}">
+                            {% csrf_token %}
+                            <button class="btn btn-danger" type="submit">Rejeter</button>
+                        </form>
+                    </div>
+                </li>
+            {% endfor %}
+        </ul>
+    {% else %}
+        <p style="color:#888;">Aucune demande en attente.</p>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h3>Mes medecins associes</h3>
+    {% if doctors %}
+        <ul style="list-style:none;padding:0;">
+            {% for doctor in doctors %}
+                <li style="padding:.8rem 0;border-bottom:1px solid #f0f0f0;display:flex;justify-content:space-between;align-items:center;gap:1rem;">
+                    <div>
+                        {% if doctor.doctor_profile %}
+                            Dr. {{ doctor.doctor_profile.first_name }} {{ doctor.doctor_profile.last_name }} - {{ doctor.doctor_profile.organization }}
+                        {% else %}
+                            {{ doctor.username }}
+                        {% endif %}
+                    </div>
+                    <form method="post" action="{% url 'core:remove_doctor' doctor.id %}">
+                        {% csrf_token %}
+                        <button class="btn btn-danger" type="submit">Retirer</button>
+                    </form>
+                </li>
+            {% endfor %}
+        </ul>
+    {% else %}
+        <p style="color:#888;">Aucun medecin associe.</p>
+    {% endif %}
+</div>
+
+<script>
+    // ── Utilitaires ──────────────────────────────────────────────────────────
+
+    /** Recupere le CSRF token depuis le cookie Django. */
+    function getCsrfToken() {
+        const name = 'csrftoken';
+        for (const cookie of document.cookie.split(';')) {
+            const [k, v] = cookie.trim().split('=');
+            if (k === name) return decodeURIComponent(v);
+        }
+        return '';
+    }
+
+    /** Convertit une chaine base64 en ArrayBuffer. */
+    function base64ToArrayBuffer(b64) {
+        const binary = atob(b64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+            bytes[i] = binary.charCodeAt(i);
+        }
+        return bytes.buffer;
+    }
+
+    /** Convertit un ArrayBuffer en chaine base64. */
+    function arrayBufferToBase64(buffer) {
+        const bytes = new Uint8Array(buffer);
+        let binary = '';
+        for (let i = 0; i < bytes.length; i++) {
+            binary += String.fromCharCode(bytes[i]);
+        }
+        return btoa(binary);
+    }
+
+    // ── Re-chiffrement des cles AES ──────────────────────────────────────────
+
+    /**
+     * Re-chiffre toutes les cles AES des fichiers du patient avec la cle publique
+     * du nouveau medecin, puis appelle submitCallback() pour effectuer l'ajout.
+     *
+     * @param {number} doctorId  - ID de l'utilisateur medecin a ajouter
+     * @param {Function} submitCallback - Fonction appelee apres le re-chiffrement reussi
+     */
+    async function reEncryptAndAddDoctor(doctorId, submitCallback) {
+        // Verifier que la cle privee est disponible dans sessionStorage
+        const privateKeyB64 = sessionStorage.getItem('privateKeyPkcs8B64');
+        if (!privateKeyB64) {
+            alert('Cle privee introuvable dans la session. Veuillez vous deconnecter et reconnecter.');
+            return;
+        }
+
+        try {
+            // Etape 1 : recuperer la cle publique RSA du nouveau medecin
+            const pubKeyResp = await fetch(`{% url 'core:api_user_public_key' 0 %}`.replace('/0/', `/${doctorId}/`));
+            if (!pubKeyResp.ok) {
+                alert('Impossible de recuperer la cle publique du medecin.');
+                return;
+            }
+            const pubKeyData = await pubKeyResp.json();
+            const doctorPublicKeyB64 = pubKeyData.public_key;
+
+            // Etape 2 : recuperer tous les FileKeyShare du patient connecte
+            const fileKeysResp = await fetch(`{% url 'core:api_my_file_keys' %}`);
+            if (!fileKeysResp.ok) {
+                alert('Impossible de recuperer la liste de vos fichiers.');
+                return;
+            }
+            const fileKeysData = await fileKeysResp.json();
+            const keyShares = fileKeysData.key_shares;
+
+            // Si le patient n'a aucun fichier, on passe directement a l'ajout
+            if (!keyShares || keyShares.length === 0) {
+                submitCallback();
+                return;
+            }
+
+            // Etape 3 : importer la cle privee du patient (PKCS8, RSA-OAEP, SHA-256)
+            const privateKeyBuffer = base64ToArrayBuffer(privateKeyB64);
+            const patientPrivateKey = await crypto.subtle.importKey(
+                'pkcs8',
+                privateKeyBuffer,
+                { name: 'RSA-OAEP', hash: 'SHA-256' },
+                false,
+                ['decrypt']
+            );
+
+            // Etape 4 : importer la cle publique du medecin (SPKI, RSA-OAEP, SHA-256)
+            const doctorPublicKeyBuffer = base64ToArrayBuffer(doctorPublicKeyB64);
+            const doctorPublicKey = await crypto.subtle.importKey(
+                'spki',
+                doctorPublicKeyBuffer,
+                { name: 'RSA-OAEP', hash: 'SHA-256' },
+                false,
+                ['encrypt']
+            );
+
+            // Etape 5 : pour chaque fichier, dechiffrer la cle AES puis re-chiffrer
+            const newShares = [];
+            for (const ks of keyShares) {
+                // Dechiffrer la cle AES avec la cle privee du patient
+                const encAesKeyBuffer = base64ToArrayBuffer(ks.encrypted_aes_key);
+                const aesKeyBuffer = await crypto.subtle.decrypt(
+                    { name: 'RSA-OAEP' },
+                    patientPrivateKey,
+                    encAesKeyBuffer
+                );
+
+                // Re-chiffrer la cle AES brute avec la cle publique du medecin
+                const newEncAesKeyBuffer = await crypto.subtle.encrypt(
+                    { name: 'RSA-OAEP' },
+                    doctorPublicKey,
+                    aesKeyBuffer
+                );
+
+                newShares.push({
+                    file_id: ks.file_id,
+                    user_id: doctorId,
+                    encrypted_aes_key: arrayBufferToBase64(newEncAesKeyBuffer),
+                });
+            }
+
+            // Etape 6 : envoyer les nouveaux FileKeyShare au serveur
+            const addSharesResp = await fetch(`{% url 'core:api_add_file_key_shares' %}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCsrfToken(),
+                },
+                body: JSON.stringify({ shares: newShares }),
+            });
+
+            if (!addSharesResp.ok) {
+                let errMsg = 'Erreur inconnue';
+                try {
+                    const errData = await addSharesResp.json();
+                    errMsg = errData.error || errMsg;
+                } catch (_) {}
+                alert(`Erreur lors du partage des cles : ${errMsg}`);
+                return;
+            }
+
+            // Etape 7 : tout est OK, effectuer l'ajout du medecin
+            submitCallback();
+
+        } catch (err) {
+            alert(`Erreur lors du re-chiffrement : ${err.message}`);
+        }
+    }
+
+    // ── Recherche de medecins ────────────────────────────────────────────────
+
+    const searchInput = document.getElementById('doctor-search');
+    const resultsContainer = document.getElementById('doctor-results');
+    const ADD_DOCTOR_URL = '{% url "core:add_doctor" %}';
+
+    /**
+     * Affiche les resultats de la recherche de medecins.
+     * Le bouton Ajouter utilise data-doctor-id et la classe reencrypt-add-btn
+     * pour que le re-chiffrement soit fait avant l'envoi du formulaire POST.
+     */
+    function renderDoctorResults(results) {
+        if (!results.length) {
+            resultsContainer.innerHTML = '<p style="color:#888;">Aucun medecin trouve.</p>';
+            return;
+        }
+        resultsContainer.innerHTML = results.map((doctor) => `
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:.6rem 0;border-bottom:1px solid #f0f0f0;">
+                <div><strong>${doctor.full_name}</strong> - ${doctor.organization}</div>
+                <button type="button"
+                        class="btn btn-primary reencrypt-add-btn"
+                        data-doctor-id="${doctor.id}">
+                    Ajouter
+                </button>
+            </div>
+        `).join('');
+    }
+
+    // Delegation d'evenement pour les boutons Ajouter generes dynamiquement
+    document.addEventListener('click', async (e) => {
+        const btn = e.target.closest('.reencrypt-add-btn');
+        if (!btn) return;
+
+        btn.disabled = true;
+        btn.textContent = 'En cours...';
+
+        const doctorId = parseInt(btn.dataset.doctorId, 10);
+
+        await reEncryptAndAddDoctor(doctorId, () => {
+            // Construire et soumettre le formulaire POST add_doctor
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = ADD_DOCTOR_URL;
+
+            const csrfInput = document.createElement('input');
+            csrfInput.type = 'hidden';
+            csrfInput.name = 'csrfmiddlewaretoken';
+            csrfInput.value = getCsrfToken();
+            form.appendChild(csrfInput);
+
+            const doctorInput = document.createElement('input');
+            doctorInput.type = 'hidden';
+            doctorInput.name = 'doctor_id';
+            doctorInput.value = doctorId;
+            form.appendChild(doctorInput);
+
+            document.body.appendChild(form);
+            form.submit();
+        });
+
+        // Restaurer le bouton si une erreur s'est produite (sinon la page change)
+        btn.disabled = false;
+        btn.textContent = 'Ajouter';
+    });
+
+    // Interception des formulaires Approuver : re-chiffrement avant le POST
+    document.querySelectorAll('.reencrypt-approve-form').forEach((form) => {
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const doctorId = parseInt(form.dataset.doctorId, 10);
+            const btn = form.querySelector('button[type="submit"]');
+            if (btn) {
+                btn.disabled = true;
+                btn.textContent = 'En cours...';
+            }
+
+            await reEncryptAndAddDoctor(doctorId, () => {
+                // Soumettre le formulaire apres le re-chiffrement reussi
+                // form.submit() contourne l'eventListener, evitant une boucle infinie
+                form.submit();
+            });
+
+            // Restaurer le bouton si une erreur s'est produite
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = 'Approuver';
+            }
+        });
+    });
+
+    // ── Debounce de la recherche ─────────────────────────────────────────────
+
+    let debounceTimer;
+    searchInput.addEventListener('input', () => {
+        const q = searchInput.value.trim();
+        clearTimeout(debounceTimer);
+        if (q.length < 2) {
+            resultsContainer.innerHTML = '';
+            return;
+        }
+        debounceTimer = setTimeout(async () => {
+            try {
+                const response = await fetch(`{% url 'core:search_doctors' %}?q=${encodeURIComponent(q)}`);
+                const data = await response.json();
+                renderDoctorResults(data.results || []);
+            } catch (error) {
+                resultsContainer.innerHTML = '<p style="color:#a00;">Erreur de recherche.</p>';
+            }
+        }, 250);
+    });
+</script>
+{% endblock %}

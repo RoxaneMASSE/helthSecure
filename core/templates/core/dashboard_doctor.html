@@ -9,13 +9,18 @@
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
     <div class="card">
         <h3>👥 My patients</h3>
-        <p style="color:#888;margin:.5rem 0 1rem;">Assigned patients</p>
-        <a href="#" class="btn btn-primary">Check patients</a>
+        <p style="color:#888;margin:.5rem 0 1rem;">
+            Assigned patients
+            {% if sent_requests_pending_count > 0 %}
+                ({{ sent_requests_pending_count }} demande{{ sent_requests_pending_count|pluralize }} envoyee{{ sent_requests_pending_count|pluralize }} en attente)
+            {% endif %}
+        </p>
+        <a href="{% url 'core:my_patients' %}" class="btn btn-primary">Check patients</a>
     </div>
     <div class="card">
         <h3>📁 Medical records</h3>
         <p style="color:#888;margin:.5rem 0 1rem;">Manage medical records</p>
-        <a href="#" class="btn btn-primary">Check records</a>
+        <a href="{% url 'core:my_patients' %}" class="btn btn-primary">Check records</a>
     </div>
 </div>
 {% endblock %}

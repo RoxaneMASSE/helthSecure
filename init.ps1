@@ -8,7 +8,8 @@ Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
 
 # ── Config Keycloak ────────────────────────────────────
-$KC_URL    = "http://localhost:8080"
+$KC_URL          = "http://localhost:8080"   # URL publique (via Nginx) → KEYCLOAK_URL dans .env
+$KC_URL_INTERNAL = "http://localhost:8180"   # URL interne directe (bypass Nginx) → appels admin
 $REALM     = "health"
 $CLIENT_ID = "django-health"
 $ADMIN     = "admin"
@@ -148,7 +149,7 @@ do {
     Start-Sleep 3
     Write-Host "." -NoNewline
     try {
-        $resp = Invoke-WebRequest -Uri "$KC_URL/realms/master" -UseBasicParsing -ErrorAction SilentlyContinue
+        $resp = Invoke-WebRequest -Uri "$KC_URL_INTERNAL/realms/master" -UseBasicParsing -ErrorAction SilentlyContinue
         $ready = $resp.StatusCode -eq 200
     } catch { $ready = $false }
 } while (-not $ready)
@@ -158,7 +159,7 @@ Write-Host "✔ Keycloak prêt" -ForegroundColor Green
 # Token admin
 $tokenBody = "grant_type=password&client_id=admin-cli&username=$ADMIN&password=$ADMIN_PASS"
 $tokenResp  = Invoke-RestMethod -Method Post `
-  -Uri "$KC_URL/realms/master/protocol/openid-connect/token" `
+  -Uri "$KC_URL_INTERNAL/realms/master/protocol/openid-connect/token" `
   -ContentType "application/x-www-form-urlencoded" `
   -Body $tokenBody
 $TOKEN = $tokenResp.access_token
@@ -167,11 +168,11 @@ Write-Host "✔ Token admin obtenu" -ForegroundColor Green
 $headers = @{ Authorization = "Bearer $TOKEN"; "Content-Type" = "application/json" }
 
 # Création realm
-$realms = Invoke-RestMethod -Uri "$KC_URL/admin/realms" -Headers $headers
+$realms = Invoke-RestMethod -Uri "$KC_URL_INTERNAL/admin/realms" -Headers $headers
 if ($realms | Where-Object { $_.realm -eq $REALM }) {
     Write-Host "✔ Realm '$REALM' existe déjà" -ForegroundColor Green
 } else {
-    Invoke-RestMethod -Method Post -Uri "$KC_URL/admin/realms" -Headers $headers `
+    Invoke-RestMethod -Method Post -Uri "$KC_URL_INTERNAL/admin/realms" -Headers $headers `
       -Body '{"realm":"' + $REALM + '","enabled":true}' | Out-Null
     Write-Host "✔ Realm '$REALM' créé" -ForegroundColor Green
 }
@@ -179,14 +180,14 @@ if ($realms | Where-Object { $_.realm -eq $REALM }) {
 # Création roles
 foreach ($ROLE in @("doctor", "patient")) {
     try {
-        Invoke-RestMethod -Method Post -Uri "$KC_URL/admin/realms/$REALM/roles" `
+        Invoke-RestMethod -Method Post -Uri "$KC_URL_INTERNAL/admin/realms/$REALM/roles" `
           -Headers $headers -Body "{`"name`":`"$ROLE`"}" | Out-Null
     } catch {}
     Write-Host "✔ Rôle '$ROLE' créé" -ForegroundColor Green
 }
 
 # Création client OIDC
-$existingClients = Invoke-RestMethod -Uri "$KC_URL/admin/realms/$REALM/clients?clientId=$CLIENT_ID" -Headers $headers
+$existingClients = Invoke-RestMethod -Uri "$KC_URL_INTERNAL/admin/realms/$REALM/clients?clientId=$CLIENT_ID" -Headers $headers
 if ($existingClients.Count -gt 0) {
     Write-Host "✔ Client '$CLIENT_ID' existe déjà" -ForegroundColor Green
     $CLIENT_UUID = $existingClients[0].id
@@ -200,15 +201,19 @@ if ($existingClients.Count -gt 0) {
         redirectUris           = @("http://localhost:8000/oidc/callback/", "http://127.0.0.1:8000/oidc/callback/")
         webOrigins             = @("http://localhost:8000", "http://127.0.0.1:8000")
     } | ConvertTo-Json
-    Invoke-RestMethod -Method Post -Uri "$KC_URL/admin/realms/$REALM/clients" `
+    Invoke-RestMethod -Method Post -Uri "$KC_URL_INTERNAL/admin/realms/$REALM/clients" `
       -Headers $headers -Body $clientBody | Out-Null
     Write-Host "✔ Client OIDC '$CLIENT_ID' créé" -ForegroundColor Green
-    $existingClients = Invoke-RestMethod -Uri "$KC_URL/admin/realms/$REALM/clients?clientId=$CLIENT_ID" -Headers $headers
+    $existingClients = Invoke-RestMethod -Uri "$KC_URL_INTERNAL/admin/realms/$REALM/clients?clientId=$CLIENT_ID" -Headers $headers
     $CLIENT_UUID = $existingClients[0].id
 }
 
-# Secret client
-$secretResp   = Invoke-RestMethod -Uri "$KC_URL/admin/realms/$REALM/clients/$CLIENT_UUID/client-secret" -Headers $headers
+# Régénérer le secret client (l'import met "**********" comme placeholder)
+Invoke-RestMethod -Method Post -Uri "$KC_URL_INTERNAL/admin/realms/$REALM/clients/$CLIENT_UUID/client-secret" -Headers $headers | Out-Null
+Write-Host "✔ Secret client régénéré" -ForegroundColor Green
+
+# Récupérer le nouveau secret
+$secretResp   = Invoke-RestMethod -Uri "$KC_URL_INTERNAL/admin/realms/$REALM/clients/$CLIENT_UUID/client-secret" -Headers $headers
 $CLIENT_SECRET = $secretResp.value
 Write-Host "✔ Secret client récupéré" -ForegroundColor Green
 
@@ -233,6 +238,7 @@ RECAPTCHA_PUBLIC_KEY=$RECAPTCHA_PUBLIC_KEY
 RECAPTCHA_PRIVATE_KEY=$RECAPTCHA_PRIVATE_KEY
 
 KEYCLOAK_URL=$KC_URL
+KEYCLOAK_INTERNAL_URL=$KC_URL_INTERNAL
 KEYCLOAK_REALM=$REALM
 KEYCLOAK_ADMIN_USER=$ADMIN
 KEYCLOAK_ADMIN_PASSWORD=$ADMIN_PASS

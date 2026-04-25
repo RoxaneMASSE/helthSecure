@@ -1,6 +1,7 @@
 import jwt
 from mozilla_django_oidc.auth import OIDCAuthenticationBackend
 from accounts.models import UserProfile
+from core.models import PatientProfile, DoctorProfile
 
 
 class KeycloakOIDCBackend(OIDCAuthenticationBackend):
@@ -44,3 +45,15 @@ class KeycloakOIDCBackend(OIDCAuthenticationBackend):
             role=role,
             keycloak_id=claims.get("sub", "")
         )
+
+        if role == "patient":
+            PatientProfile.objects.get_or_create(user=user)
+        elif role == "doctor":
+            DoctorProfile.objects.get_or_create(
+                user=user,
+                defaults={
+                    "first_name": claims.get("given_name", ""),
+                    "last_name": claims.get("family_name", ""),
+                    "organization": "",
+                },
+            )

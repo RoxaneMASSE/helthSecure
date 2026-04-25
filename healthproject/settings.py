@@ -74,6 +74,8 @@ USE_TZ = True
 STATIC_URL = "static/"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 KEYCLOAK_URL   = config('KEYCLOAK_URL', default='http://localhost:8080')
+# URL interne directe vers Keycloak (port 8180, bypass Nginx) pour les appels API admin Django
+KEYCLOAK_INTERNAL_URL = config('KEYCLOAK_INTERNAL_URL', default='http://localhost:8180')
 KEYCLOAK_REALM = config('KEYCLOAK_REALM', default='health')
 KEYCLOAK_ADMIN_USER     = config('KEYCLOAK_ADMIN_USER', default='admin')
 KEYCLOAK_ADMIN_PASSWORD = config('KEYCLOAK_ADMIN_PASSWORD', default='admin')

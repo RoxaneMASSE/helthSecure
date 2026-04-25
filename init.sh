@@ -10,7 +10,8 @@ echo "============================================"
 echo ""
 
 # ── Config Keycloak ────────────────────────────────────
-KC_URL="http://localhost:8080"
+KC_URL="http://localhost:8080"          # URL publique (via Nginx) → KEYCLOAK_URL dans .env
+KC_URL_INTERNAL="http://localhost:8180" # URL interne directe (bypass Nginx) → appels admin
 REALM="health"
 CLIENT_ID="django-health"
 ADMIN="admin"
@@ -117,8 +118,6 @@ else
 fi
 
 if command -v openssl &>/dev/null; then
-
-    # ── CORRECTION : vérifier que les fichiers doctors existent réellement ──
     if [ -f "pki/doctors/dr-test-fullchain.pem" ] && \
        [ -f "pki/doctors/dr-test-cert.pem" ] && \
        [ -f "pki/doctors/dr-test-key.pem" ] && \
@@ -128,14 +127,12 @@ if command -v openssl &>/dev/null; then
         echo "  Génération de la PKI complète..."
         mkdir -p pki/root-ca pki/intermediate-ca pki/doctors trusted_cas
 
-        # Root CA
         openssl genrsa -out pki/root-ca/root-ca-key.pem 4096 2>/dev/null
         openssl req -x509 -new -key pki/root-ca/root-ca-key.pem \
           -out pki/root-ca/root-ca-cert.pem -days 3650 \
           -subj "${SUBJ_PREFIX}C=BE/O=Medical Root CA/CN=Root CA" 2>/dev/null
         echo "  ✓ Root CA"
 
-        # Intermediate CA
         openssl genrsa -out pki/intermediate-ca/int-key.pem 4096 2>/dev/null
         openssl req -new -key pki/intermediate-ca/int-key.pem \
           -out pki/intermediate-ca/int-csr.pem \
@@ -146,7 +143,6 @@ if command -v openssl &>/dev/null; then
           -out pki/intermediate-ca/int-cert.pem -days 1825 2>/dev/null
         echo "  ✓ Intermediate CA"
 
-        # Certificat Dr. Test
         openssl genrsa -out pki/doctors/dr-test-key.pem 2048 2>/dev/null
         openssl req -new -key pki/doctors/dr-test-key.pem \
           -out pki/doctors/dr-test-csr.pem \
@@ -157,14 +153,12 @@ if command -v openssl &>/dev/null; then
           -out pki/doctors/dr-test-cert.pem -days 365 2>/dev/null
         echo "  ✓ Certificat Dr. Test"
 
-        # Fullchain
         cat pki/doctors/dr-test-cert.pem \
             pki/intermediate-ca/int-cert.pem \
             pki/root-ca/root-ca-cert.pem \
             > pki/doctors/dr-test-fullchain.pem
         echo "  ✓ Fullchain généré"
 
-        # trusted_cas
         cp pki/root-ca/root-ca-cert.pem trusted_cas/
         cp pki/intermediate-ca/int-cert.pem trusted_cas/
         echo "  ✓ trusted_cas peuplé"
@@ -191,99 +185,67 @@ else
     echo "⚠️  OpenSSL non trouvé, TLS ignoré"
 fi
 
-# ── [6/7] Keycloak ────────────────────────────────────
+# ── [6/7] Keycloak (import automatique) ───────────────
 echo "[6/7] Lancement Keycloak..."
 docker compose -f docker-compose.keycloak.yml up -d
 
 echo "Attente Keycloak (peut prendre 30s)..."
-until curl -s "${KC_URL}/realms/master" >/dev/null 2>&1; do
+until curl -s "${KC_URL_INTERNAL}/realms/master" >/dev/null 2>&1; do
     sleep 3
     echo -n "."
 done
 echo ""
 echo "✔ Keycloak prêt"
 
+echo "Attente du realm importé '${REALM}'..."
+until curl -s "${KC_URL_INTERNAL}/realms/${REALM}" >/dev/null 2>&1; do
+    sleep 3
+    echo -n "."
+done
+echo ""
+echo "✔ Realm '${REALM}' disponible (import auto via --import-realm)"
+
 # Token admin
 TOKEN=$(curl -s \
-  -X POST "${KC_URL}/realms/master/protocol/openid-connect/token" \
+  -X POST "${KC_URL_INTERNAL}/realms/master/protocol/openid-connect/token" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -d "grant_type=password&client_id=admin-cli&username=${ADMIN}&password=${ADMIN_PASS}" \
   | $PYTHON_CMD -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
 echo "✔ Token admin obtenu"
 
-# Création realm
-REALM_EXISTS=$(curl -s \
-  -H "Authorization: Bearer $TOKEN" \
-  "${KC_URL}/admin/realms" \
-  | $PYTHON_CMD -c "import sys,json; r=json.load(sys.stdin); print(any(x['realm']=='${REALM}' for x in r))")
-
-if [ "$REALM_EXISTS" = "True" ]; then
-    echo "✔ Realm '${REALM}' existe déjà"
-else
-    curl -s -X POST "${KC_URL}/admin/realms" \
+# Attendre que le client soit disponible après import
+echo "Attente du client '${CLIENT_ID}'..."
+CLIENT_UUID=""
+until [ -n "$CLIENT_UUID" ]; do
+    sleep 3
+    echo -n "."
+    CLIENT_UUID=$(curl -s \
       -H "Authorization: Bearer $TOKEN" \
-      -H "Content-Type: application/json" \
-      -d "{\"realm\":\"${REALM}\",\"enabled\":true}" >/dev/null
-    echo "✔ Realm '${REALM}' créé"
-fi
-
-# Création roles
-for ROLE in doctor patient; do
-    curl -s -X POST "${KC_URL}/admin/realms/${REALM}/roles" \
-      -H "Authorization: Bearer $TOKEN" \
-      -H "Content-Type: application/json" \
-      -d "{\"name\":\"$ROLE\"}" >/dev/null 2>&1 || true
-    echo "✔ Rôle '$ROLE' créé"
-done
-
-# Création client OIDC (seulement s'il n'existe pas)
-CLIENT_EXISTS=$(curl -s \
-  -H "Authorization: Bearer $TOKEN" \
-  "${KC_URL}/admin/realms/${REALM}/clients?clientId=${CLIENT_ID}" \
-  | $PYTHON_CMD -c "import sys,json; c=json.load(sys.stdin); print(len(c) > 0)")
-
-if [ "$CLIENT_EXISTS" = "True" ]; then
-    echo "✔ Client '${CLIENT_ID}' existe déjà"
-else
-    CREATE_RESP=$(curl -s -X POST "${KC_URL}/admin/realms/${REALM}/clients" \
-      -H "Authorization: Bearer $TOKEN" \
-      -H "Content-Type: application/json" \
-      -d "{
-        \"clientId\":\"${CLIENT_ID}\",
-        \"enabled\":true,
-        \"protocol\":\"openid-connect\",
-        \"publicClient\":false,
-        \"clientAuthenticatorType\":\"client-secret\",
-        \"redirectUris\":[
-          \"http://localhost:8000/oidc/callback/\",
-          \"http://127.0.0.1:8000/oidc/callback/\"
-        ],
-        \"webOrigins\":[
-          \"http://localhost:8000\",
-          \"http://127.0.0.1:8000\"
-        ]
-      }")
-    echo "✔ Client OIDC '${CLIENT_ID}' créé"
-fi
-
-# Récupérer UUID client
-CLIENT_UUID=$(curl -s \
-  -H "Authorization: Bearer $TOKEN" \
-  "${KC_URL}/admin/realms/${REALM}/clients?clientId=${CLIENT_ID}" \
-  | $PYTHON_CMD -c "
+      "${KC_URL_INTERNAL}/admin/realms/${REALM}/clients?clientId=${CLIENT_ID}" \
+      | $PYTHON_CMD -c "
 import sys,json
 c=json.load(sys.stdin)
-if not c:
-    print('❌ Client introuvable après création', file=sys.stderr)
-    sys.exit(1)
-print(c[0]['id'])
-")
+if c:
+    print(c[0]['id'])
+else:
+    print('')
+" 2>/dev/null) || CLIENT_UUID=""
+done
+echo ""
+echo "✔ Client '${CLIENT_ID}' trouvé"
+
+# Régénérer le secret client (l'import met "**********" comme placeholder)
+curl -s -X POST \
+  -H "Authorization: Bearer $TOKEN" \
+  "${KC_URL_INTERNAL}/admin/realms/${REALM}/clients/${CLIENT_UUID}/client-secret" > /dev/null
+echo "✔ Secret client régénéré"
 
 CLIENT_SECRET=$(curl -s \
   -H "Authorization: Bearer $TOKEN" \
-  "${KC_URL}/admin/realms/${REALM}/clients/${CLIENT_UUID}/client-secret" \
+  "${KC_URL_INTERNAL}/admin/realms/${REALM}/clients/${CLIENT_UUID}/client-secret" \
   | $PYTHON_CMD -c "import sys,json; print(json.load(sys.stdin)['value'])")
 echo "✔ Secret client récupéré"
+echo "✔ Configuration Keycloak importée automatiquement depuis keycloak/import/realm-export.json"
 
 # ── [7/7] Génération .env ─────────────────────────────
 echo "[7/7] Génération .env..."
@@ -305,6 +267,7 @@ RECAPTCHA_PUBLIC_KEY=${RECAPTCHA_PUBLIC_KEY}
 RECAPTCHA_PRIVATE_KEY=${RECAPTCHA_PRIVATE_KEY}
 
 KEYCLOAK_URL=${KC_URL}
+KEYCLOAK_INTERNAL_URL=${KC_URL_INTERNAL}
 KEYCLOAK_REALM=${REALM}
 KEYCLOAK_ADMIN_USER=${ADMIN}
 KEYCLOAK_ADMIN_PASSWORD=${ADMIN_PASS}

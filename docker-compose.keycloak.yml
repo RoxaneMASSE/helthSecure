@@ -7,12 +7,33 @@ services:
     environment:
       KEYCLOAK_ADMIN: admin
       KEYCLOAK_ADMIN_PASSWORD: admin
+    # Port 8080 n'est plus exposé vers l'hôte (accès uniquement via Nginx ou le port interne)
+    # Port 8180 → accès direct interne pour Django et les scripts init (contourne Nginx)
     ports:
-      - "8080:8080"
+      - "8180:8080"
     volumes:
       - keycloak_data:/opt/keycloak/data
-      - ./themes/my-theme:/opt/keycloak/themes/my-theme 
-    command: start-dev
+      - ./themes/my-theme:/opt/keycloak/themes/my-theme
+      - ./keycloak/import:/opt/keycloak/data/import
+    command: start-dev --import-realm --hostname=http://localhost:8080 --proxy-headers=xforwarded
+    networks:
+      - keycloak_net
+
+  nginx:
+    image: nginx:alpine
+    container_name: keycloak_nginx
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - keycloak
+    networks:
+      - keycloak_net
+
+networks:
+  keycloak_net:
+    driver: bridge
 
 volumes:
   keycloak_data:
