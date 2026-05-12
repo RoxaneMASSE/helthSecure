@@ -3,7 +3,8 @@
 
 {% block content %}
 <div class="card">
-    <h2>Mes patients <span class="badge-doctor">Doctor</span></h2>
+    <a href="{% url 'core:dashboard_doctor' %}" style="color:#457b9d;font-size:.9rem;">← Retour au tableau de bord</a>
+    <h2 style="margin-top:.8rem;">Mes patients <span class="badge-doctor">Doctor</span></h2>
 </div>
 
 <div class="card">

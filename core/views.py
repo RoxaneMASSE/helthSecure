@@ -11,8 +11,7 @@ from django.views.decorators.http import require_GET, require_POST
 from django_ratelimit.decorators import ratelimit
 
 from accounts.decorators import role_required
-from .models import DoctorAppointmentRequest, DoctorProfile, FileKeyShare, MedicalFile
-
+from .models import DoctorAppointmentRequest, DoctorProfile, FileDeletionRequest, FileKeyShare, MedicalFile, FileModificationRequest
 
 def home(request):
     if request.user.is_authenticated:
@@ -292,8 +291,52 @@ def medical_files(request):
             "requires_approval": f.requires_approval,
             "approved": f.approved,
         })
+
+    # Demandes de suppression en attente pour les fichiers de ce patient
+    pending_deletion_requests = (
+        FileDeletionRequest.objects
+        .filter(file__patient=request.user, status=FileDeletionRequest.STATUS_PENDING)
+        .select_related("doctor__doctor_profile", "file")
+    )
+    deletion_requests_data = []
+    for dr in pending_deletion_requests:
+        doctor_name = (
+            f"Dr. {dr.doctor.doctor_profile.first_name} {dr.doctor.doctor_profile.last_name}"
+            if hasattr(dr.doctor, "doctor_profile") else dr.doctor.username
+        )
+        deletion_requests_data.append({
+            "id": dr.id,
+            "file_id": dr.file_id,
+            "doctor_name": doctor_name,
+        })
+
+    # Demandes de modification en attente
+    pending_modification_requests = (
+        FileModificationRequest.objects
+        .filter(file__patient=request.user, status=FileModificationRequest.STATUS_PENDING)
+        .select_related("doctor__doctor_profile", "file")
+    )
+    modification_requests_data = []
+    for mr in pending_modification_requests:
+        doctor_name = (
+            f"Dr. {mr.doctor.doctor_profile.first_name} {mr.doctor.doctor_profile.last_name}"
+            if hasattr(mr.doctor, "doctor_profile") else mr.doctor.username
+        )
+        modification_requests_data.append({
+            "id": mr.id,
+            "file_id": mr.file_id,
+            "doctor_name": doctor_name,
+            "new_encrypted_filename": mr.new_encrypted_filename,
+            "new_encrypted_date": mr.new_encrypted_date,
+            "new_file_iv": mr.new_file_iv,
+            # Note : le nouveau fichier chiffré n'est pas transmis ici,
+            # il sera récupéré au moment de l'approbation côté serveur.
+        })
+
     return render(request, "core/medical_files.html", {
         "files_data_json": json.dumps(files_data),
+        "deletion_requests_json": json.dumps(deletion_requests_data),
+        "modification_requests_json": json.dumps(modification_requests_data),
     })
 
 
@@ -467,6 +510,15 @@ def doctor_patient_files(request, patient_id):
     files_data = []
     for f in files:
         ks = f.key_shares.filter(user=request.user).first()
+        # Verifier s'il y a deja une demande de suppression en attente par CE medecin
+        pending_del = f.deletion_requests.filter(
+            doctor=request.user, status=FileDeletionRequest.STATUS_PENDING
+        ).exists()
+        
+        pending_mod = f.modification_requests.filter(
+            doctor=request.user, status=FileModificationRequest.STATUS_PENDING
+        ).exists()
+        
         files_data.append({
             "id": f.id,
             "encrypted_filename": f.encrypted_filename,
@@ -475,6 +527,8 @@ def doctor_patient_files(request, patient_id):
             "encrypted_aes_key": ks.encrypted_aes_key if ks else None,
             "requires_approval": f.requires_approval,
             "approved": f.approved,
+            "deletion_pending": pending_del,
+            "modification_pending": pending_mod,
         })
     return render(request, "core/doctor_patient_files.html", {
         "patient": patient,
@@ -597,6 +651,173 @@ def api_add_file_key_shares(request):
         return JsonResponse({"success": True, "created": created_count})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=400)
+
+
+@login_required
+@role_required("patient")
+@require_POST
+def api_overwrite_file(request, file_id):
+    """Ecrase le contenu chiffre d'un fichier existant. La cle AES (FileKeyShare) reste inchangee."""
+    medical_file = get_object_or_404(MedicalFile, id=file_id, patient=request.user)
+    try:
+        data = json.loads(request.body)
+        encrypted_file_b64 = data["encrypted_file"]
+        encrypted_filename = data["encrypted_filename"]
+        encrypted_date = data["encrypted_date"]
+        file_iv = data["file_iv"]
+
+        encrypted_file_bytes = base64.b64decode(encrypted_file_b64)
+        if len(encrypted_file_bytes) > 10 * 1024 * 1024:
+            return JsonResponse({"error": "Fichier trop volumineux (max 10 MB)."}, status=400)
+
+        medical_file.encrypted_file = encrypted_file_bytes
+        medical_file.encrypted_filename = encrypted_filename
+        medical_file.encrypted_date = encrypted_date
+        medical_file.file_iv = file_iv
+        medical_file.save(update_fields=["encrypted_file", "encrypted_filename", "encrypted_date", "file_iv"])
+
+        return JsonResponse({"success": True})
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+@login_required
+@role_required("doctor")
+@require_POST
+def request_file_deletion(request, file_id):
+    """Le medecin demande la suppression d'un fichier du patient."""
+    medical_file = get_object_or_404(MedicalFile, id=file_id)
+
+    # Verifier que le medecin est associe au patient proprietaire du fichier
+    try:
+        is_associated = medical_file.patient.patient_profile.doctors.filter(id=request.user.id).exists()
+    except Exception:
+        is_associated = False
+
+    if not is_associated:
+        return JsonResponse({"error": "Acces refuse."}, status=403)
+
+    deletion_req, created = FileDeletionRequest.objects.get_or_create(
+        file=medical_file,
+        doctor=request.user,
+        defaults={"status": FileDeletionRequest.STATUS_PENDING},
+    )
+    if not created:
+        if deletion_req.status == FileDeletionRequest.STATUS_REJECTED:
+            deletion_req.status = FileDeletionRequest.STATUS_PENDING
+            deletion_req.save(update_fields=["status", "updated_at"])
+            return JsonResponse({"success": True, "message": "Demande renvoyee."})
+        return JsonResponse({"success": False, "message": "Une demande est deja en cours."})
+
+    return JsonResponse({"success": True, "message": "Demande envoyee au patient."})
+
+
+@login_required
+@role_required("doctor")
+@require_POST
+def request_file_modification(request, file_id):
+    """Le médecin propose une modification chiffrée d'un fichier patient."""
+    medical_file = get_object_or_404(MedicalFile, id=file_id)
+
+    try:
+        is_associated = medical_file.patient.patient_profile.doctors.filter(id=request.user.id).exists()
+    except Exception:
+        is_associated = False
+
+    if not is_associated:
+        return JsonResponse({"error": "Accès refusé."}, status=403)
+
+    try:
+        data = json.loads(request.body)
+        new_encrypted_file_b64 = data["new_encrypted_file"]
+        new_file_iv = data["new_file_iv"]
+        new_encrypted_filename = data["new_encrypted_filename"]
+        new_encrypted_date = data["new_encrypted_date"]
+
+        new_encrypted_file_bytes = base64.b64decode(new_encrypted_file_b64)
+        if len(new_encrypted_file_bytes) > 10 * 1024 * 1024:
+            return JsonResponse({"error": "Fichier trop volumineux (max 10 MB)."}, status=400)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+    # Si une demande existe déjà (même fichier, même médecin)
+    try:
+        mod_req = FileModificationRequest.objects.get(file=medical_file, doctor=request.user)
+        # On la remplace si elle a été rejetée ou est déjà en attente
+        mod_req.new_encrypted_file = new_encrypted_file_bytes
+        mod_req.new_file_iv = new_file_iv
+        mod_req.new_encrypted_filename = new_encrypted_filename
+        mod_req.new_encrypted_date = new_encrypted_date
+        mod_req.status = FileModificationRequest.STATUS_PENDING
+        mod_req.save()
+        return JsonResponse({"success": True, "message": "Demande mise à jour et renvoyée au patient."})
+    except FileModificationRequest.DoesNotExist:
+        pass
+
+    FileModificationRequest.objects.create(
+        file=medical_file,
+        doctor=request.user,
+        status=FileModificationRequest.STATUS_PENDING,
+        new_encrypted_file=new_encrypted_file_bytes,
+        new_file_iv=new_file_iv,
+        new_encrypted_filename=new_encrypted_filename,
+        new_encrypted_date=new_encrypted_date,
+    )
+    return JsonResponse({"success": True, "message": "Demande envoyée au patient."})
+
+
+@login_required
+@role_required("patient")
+@require_POST
+def handle_deletion_request(request, request_id, action):
+    """Le patient approuve ou rejette une demande de suppression de fichier."""
+    deletion_req = get_object_or_404(
+        FileDeletionRequest,
+        id=request_id,
+        file__patient=request.user,
+        status=FileDeletionRequest.STATUS_PENDING,
+    )
+
+    if action == "approve":
+        medical_file = deletion_req.file
+        medical_file.delete()  # supprime aussi les FileKeyShare et les demandes liees (CASCADE)
+        return JsonResponse({"success": True, "action": "approved"})
+    elif action == "reject":
+        deletion_req.status = FileDeletionRequest.STATUS_REJECTED
+        deletion_req.save(update_fields=["status", "updated_at"])
+        return JsonResponse({"success": True, "action": "rejected"})
+    else:
+        return JsonResponse({"error": "Action invalide."}, status=400)
+
+
+@login_required
+@role_required("patient")
+@require_POST
+def handle_modification_request(request, request_id, action):
+    """Le patient approuve ou rejette une demande de modification de fichier."""
+    mod_req = get_object_or_404(
+        FileModificationRequest,
+        id=request_id,
+        file__patient=request.user,
+        status=FileModificationRequest.STATUS_PENDING,
+    )
+
+    if action == "approve":
+        medical_file = mod_req.file
+        medical_file.encrypted_file = bytes(mod_req.new_encrypted_file)
+        medical_file.file_iv = mod_req.new_file_iv
+        medical_file.encrypted_filename = mod_req.new_encrypted_filename
+        medical_file.encrypted_date = mod_req.new_encrypted_date
+        medical_file.save(update_fields=["encrypted_file", "file_iv", "encrypted_filename", "encrypted_date"])
+        mod_req.status = FileModificationRequest.STATUS_APPROVED
+        mod_req.save(update_fields=["status", "updated_at"])
+        return JsonResponse({"success": True, "action": "approved"})
+    elif action == "reject":
+        mod_req.status = FileModificationRequest.STATUS_REJECTED
+        mod_req.save(update_fields=["status", "updated_at"])
+        return JsonResponse({"success": True, "action": "rejected"})
+    else:
+        return JsonResponse({"error": "Action invalide."}, status=400)
 
 
 @login_required

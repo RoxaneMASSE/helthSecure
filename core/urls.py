@@ -29,4 +29,11 @@ urlpatterns = [
     path("api/user-public-key/<int:user_id>/", views.api_user_public_key, name="api_user_public_key"),
     path("api/my-file-keys/", views.api_my_file_keys, name="api_my_file_keys"),
     path("api/add-file-key-shares/", views.api_add_file_key_shares, name="api_add_file_key_shares"),
+    # Ecrasement de fichier (patient)
+    path("files/overwrite/<int:file_id>/", views.api_overwrite_file, name="api_overwrite_file"),
+    # Suppression initiee par un medecin avec approbation patient
+    path("files/request-deletion/<int:file_id>/", views.request_file_deletion, name="request_file_deletion"),
+    path("files/deletion-request/<int:request_id>/<str:action>/", views.handle_deletion_request, name="handle_deletion_request"),
+    path("files/request-modification/<int:file_id>/", views.request_file_modification, name="request_file_modification"),
+    path("files/modification-request/<int:request_id>/<str:action>/", views.handle_modification_request, name="handle_modification_request"),
 ]

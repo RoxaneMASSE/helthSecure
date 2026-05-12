@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import PatientProfile, DoctorProfile, DoctorAppointmentRequest, MedicalFile, FileKeyShare
+from .models import PatientProfile, DoctorProfile, DoctorAppointmentRequest, FileDeletionRequest, MedicalFile, FileKeyShare, FileModificationRequest
 
 
 @admin.register(MedicalFile)
@@ -27,3 +27,15 @@ class DoctorProfileAdmin(admin.ModelAdmin):
 @admin.register(DoctorAppointmentRequest)
 class DoctorAppointmentRequestAdmin(admin.ModelAdmin):
     list_display = ("doctor", "patient", "status", "created_at")
+
+
+@admin.register(FileDeletionRequest)
+class FileDeletionRequestAdmin(admin.ModelAdmin):
+    list_display = ("id", "file", "doctor", "status", "created_at")
+    list_filter = ("status",)
+    
+@admin.register(FileModificationRequest)
+class FileModificationRequestAdmin(admin.ModelAdmin):
+    list_display = ("id", "file", "doctor", "status", "created_at")
+    list_filter = ("status",)
+    readonly_fields = ("new_encrypted_file", "new_file_iv", "new_encrypted_filename", "new_encrypted_date")

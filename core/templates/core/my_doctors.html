@@ -1,9 +1,15 @@
 {% extends "base.html" %}
+{% load static %}
 {% block title %}Mes medecins{% endblock %}
+
+{% block extra_head %}
+<script src="{% static 'accounts/js/keystore.js' %}"></script>
+{% endblock %}
 
 {% block content %}
 <div class="card">
-    <h2>Mes medecins <span class="badge-patient">Patient</span></h2>
+    <a href="{% url 'core:dashboard_patient' %}" style="color:#457b9d;font-size:.9rem;">← Retour au tableau de bord</a>
+    <h2 style="margin-top:.8rem;">Mes medecins <span class="badge-patient">Patient</span></h2>
 </div>
 
 <div class="card">
@@ -116,9 +122,9 @@
      * @param {Function} submitCallback - Fonction appelee apres le re-chiffrement reussi
      */
     async function reEncryptAndAddDoctor(doctorId, submitCallback) {
-        // Verifier que la cle privee est disponible dans sessionStorage
-        const privateKeyB64 = sessionStorage.getItem('privateKeyPkcs8B64');
-        if (!privateKeyB64) {
+        // Recuperer la cle privee depuis IndexedDB (non-extractable)
+        const patientPrivateKey = await KeyStore.getPrivateKey();
+        if (!patientPrivateKey) {
             alert('Cle privee introuvable dans la session. Veuillez vous deconnecter et reconnecter.');
             return;
         }
@@ -148,17 +154,7 @@
                 return;
             }
 
-            // Etape 3 : importer la cle privee du patient (PKCS8, RSA-OAEP, SHA-256)
-            const privateKeyBuffer = base64ToArrayBuffer(privateKeyB64);
-            const patientPrivateKey = await crypto.subtle.importKey(
-                'pkcs8',
-                privateKeyBuffer,
-                { name: 'RSA-OAEP', hash: 'SHA-256' },
-                false,
-                ['decrypt']
-            );
-
-            // Etape 4 : importer la cle publique du medecin (SPKI, RSA-OAEP, SHA-256)
+            // Etape 3 : importer la cle publique du medecin (SPKI, RSA-OAEP, SHA-256)
             const doctorPublicKeyBuffer = base64ToArrayBuffer(doctorPublicKeyB64);
             const doctorPublicKey = await crypto.subtle.importKey(
                 'spki',
@@ -168,7 +164,7 @@
                 ['encrypt']
             );
 
-            // Etape 5 : pour chaque fichier, dechiffrer la cle AES puis re-chiffrer
+            // Etape 4 : pour chaque fichier, dechiffrer la cle AES puis re-chiffrer
             const newShares = [];
             for (const ks of keyShares) {
                 // Dechiffrer la cle AES avec la cle privee du patient
@@ -193,7 +189,7 @@
                 });
             }
 
-            // Etape 6 : envoyer les nouveaux FileKeyShare au serveur
+            // Etape 5 : envoyer les nouveaux FileKeyShare au serveur
             const addSharesResp = await fetch(`{% url 'core:api_add_file_key_shares' %}`, {
                 method: 'POST',
                 headers: {
@@ -213,7 +209,7 @@
                 return;
             }
 
-            // Etape 7 : tout est OK, effectuer l'ajout du medecin
+            // Etape 6 : tout est OK, effectuer l'ajout du medecin
             submitCallback();
 
         } catch (err) {

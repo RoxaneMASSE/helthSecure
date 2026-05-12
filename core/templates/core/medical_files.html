@@ -1,9 +1,15 @@
 {% extends "base.html" %}
+{% load static %}
 {% block title %}Mes fichiers medicaux{% endblock %}
+
+{% block extra_head %}
+<script src="{% static 'accounts/js/keystore.js' %}"></script>
+{% endblock %}
 
 {% block content %}
 <div class="card">
-    <h2>Mes fichiers medicaux <span class="badge-patient">Patient</span></h2>
+    <a href="{% url 'core:dashboard_patient' %}" style="color:#457b9d;font-size:.9rem;">← Retour au tableau de bord</a>
+    <h2 style="margin-top:.8rem;">Mes fichiers medicaux <span class="badge-patient">Patient</span></h2>
 </div>
 
 <div id="zone-erreur" class="alert alert-error" style="display:none;"></div>
@@ -34,6 +40,18 @@
     </form>
 </div>
 
+<!-- Demandes de suppression en attente -->
+<div class="card" id="section-deletion-requests" style="display:none;">
+    <h3 style="color:#9a6700;">Demandes de suppression en attente</h3>
+    <div id="deletion-requests-liste"></div>
+</div>
+
+<!-- Demandes de modification en attente -->
+<div class="card" id="section-modification-requests" style="display:none;">
+    <h3 style="color:#1d3557;">Modifications proposees en attente</h3>
+    <div id="modification-requests-liste"></div>
+</div>
+
 <!-- Liste des fichiers -->
 <div class="card">
     <h3>Mes fichiers</h3>
@@ -41,16 +59,23 @@
     <div id="fichiers-liste" style="display:none;"></div>
 </div>
 
+<!-- Input file cache pour l'ecrasement -->
+<input type="file" id="input-overwrite" style="display:none;">
+
 <script>
 (function () {
     'use strict';
 
-    // Donnees injectees par Django (tableau JSON de fichiers chiffres)
     const filesData = {{ files_data_json|safe }};
+    const deletionRequestsData = {{ deletion_requests_json|safe }};
+    const modificationRequestsData = {{ modification_requests_json|safe }};
     const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
 
     // Cache en memoire: {id -> {filename, aesKey}}
     const decryptedCache = new Map();
+
+    // ID du fichier en cours d'ecrasement
+    let overwriteTargetFileId = null;
 
     // ── Utilitaires base64 <-> ArrayBuffer ────────────────────────────────────
 
@@ -70,96 +95,58 @@
 
     // ── Fonctions crypto ──────────────────────────────────────────────────────
 
-    // Importe la cle privee RSA-OAEP depuis un base64 PKCS8
-    async function importerClePrivee(b64) {
-        return crypto.subtle.importKey(
-            'pkcs8',
-            base64ToBuffer(b64),
-            { name: 'RSA-OAEP', hash: 'SHA-256' },
-            false,
-            ['decrypt']
-        );
-    }
-
-    // Importe une cle publique RSA-OAEP depuis un base64 SPKI
     async function importerClePublique(b64) {
         return crypto.subtle.importKey(
-            'spki',
-            base64ToBuffer(b64),
-            { name: 'RSA-OAEP', hash: 'SHA-256' },
-            false,
-            ['encrypt']
+            'spki', base64ToBuffer(b64),
+            { name: 'RSA-OAEP', hash: 'SHA-256' }, false, ['encrypt']
         );
     }
 
-    // Genere une cle AES-256-GCM aleatoire
     async function genererCleAES() {
         return crypto.subtle.generateKey(
-            { name: 'AES-GCM', length: 256 },
-            true,
-            ['encrypt', 'decrypt']
+            { name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']
         );
     }
 
-    // Exporte une cle AES comme ArrayBuffer brut
     async function exporterCleAES(cleAes) {
         return crypto.subtle.exportKey('raw', cleAes);
     }
 
-    // Importe des octets bruts comme cle AES-256-GCM
     async function importerCleAES(rawBuffer) {
         return crypto.subtle.importKey(
-            'raw',
-            rawBuffer,
-            { name: 'AES-GCM', length: 256 },
-            false,
-            ['encrypt', 'decrypt']
+            'raw', rawBuffer,
+            { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']
         );
     }
 
-    // Chiffre des donnees avec AES-GCM; retourne base64(IV || ciphertext)
     async function aesChiffrer(cleAes, donnees) {
         const iv = crypto.getRandomValues(new Uint8Array(12));
         const ciphertext = await crypto.subtle.encrypt(
-            { name: 'AES-GCM', iv: iv },
-            cleAes,
-            donnees
+            { name: 'AES-GCM', iv: iv }, cleAes, donnees
         );
-        // Concatener IV (12 octets) + ciphertext
         const resultat = new Uint8Array(12 + ciphertext.byteLength);
         resultat.set(iv, 0);
         resultat.set(new Uint8Array(ciphertext), 12);
         return bufferToBase64(resultat.buffer);
     }
 
-    // Dechiffre un base64(IV || ciphertext) avec AES-GCM; retourne ArrayBuffer
     async function aesDechiffrer(cleAes, b64IvCiphertext) {
         const buf = base64ToBuffer(b64IvCiphertext);
         const iv = new Uint8Array(buf, 0, 12);
         const ciphertext = new Uint8Array(buf, 12);
-        return crypto.subtle.decrypt(
-            { name: 'AES-GCM', iv: iv },
-            cleAes,
-            ciphertext
-        );
+        return crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv }, cleAes, ciphertext);
     }
 
-    // Chiffre les octets de la cle AES avec RSA-OAEP (cle publique)
     async function rsaChiffrerCleAES(clePublique, aesKeyBuffer) {
         const ciphertext = await crypto.subtle.encrypt(
-            { name: 'RSA-OAEP' },
-            clePublique,
-            aesKeyBuffer
+            { name: 'RSA-OAEP' }, clePublique, aesKeyBuffer
         );
         return bufferToBase64(ciphertext);
     }
 
-    // Dechiffre un base64 de cle AES avec RSA-OAEP (cle privee)
     async function rsaDechiffrerCleAES(clePrivee, encryptedKeyB64) {
         return crypto.subtle.decrypt(
-            { name: 'RSA-OAEP' },
-            clePrivee,
-            base64ToBuffer(encryptedKeyB64)
+            { name: 'RSA-OAEP' }, clePrivee, base64ToBuffer(encryptedKeyB64)
         );
     }
 
@@ -179,10 +166,17 @@
         setTimeout(() => { z.style.display = 'none'; }, 4000);
     }
 
+    function escapeHtml(str) {
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+
     // ── Rendu de la liste des fichiers ────────────────────────────────────────
 
     function renderFichierRow(fileId, filename, date, requiresApproval, approved) {
-        // Fichier en attente d'approbation : boutons Approuver/Rejeter uniquement
         if (requiresApproval && !approved) {
             return `
         <div id="file-row-${fileId}" style="display:flex;justify-content:space-between;align-items:center;padding:.8rem 0;border-bottom:1px solid #f0f0f0;gap:1rem;flex-wrap:wrap;">
@@ -201,7 +195,6 @@
             </div>
         </div>`;
         }
-        // Fichier normal (approuve ou ne necessitant pas d'approbation) : Telecharger + Supprimer
         return `
         <div id="file-row-${fileId}" style="display:flex;justify-content:space-between;align-items:center;padding:.8rem 0;border-bottom:1px solid #f0f0f0;gap:1rem;flex-wrap:wrap;">
             <div>
@@ -212,19 +205,14 @@
                 <button class="btn btn-primary btn-download" data-file-id="${fileId}" style="font-size:.85rem;padding:.45rem 1rem;">
                     Telecharger
                 </button>
+                <button class="btn btn-overwrite" data-file-id="${fileId}" style="font-size:.85rem;padding:.45rem 1rem;background:#457b9d;color:#fff;border:none;border-radius:8px;cursor:pointer;">
+                    Modifier
+                </button>
                 <button class="btn btn-danger btn-delete" data-file-id="${fileId}" style="font-size:.85rem;padding:.45rem 1rem;">
                     Supprimer
                 </button>
             </div>
         </div>`;
-    }
-
-    function escapeHtml(str) {
-        return String(str)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;');
     }
 
     // ── Chargement initial: dechiffrement des metadonnees ─────────────────────
@@ -239,19 +227,9 @@
             return;
         }
 
-        // Recupere la cle privee RSA depuis sessionStorage
-        const privateKeyB64 = sessionStorage.getItem('privateKeyPkcs8B64');
-        if (!privateKeyB64) {
+        const privateKey = await KeyStore.getPrivateKey();
+        if (!privateKey) {
             zoneChargement.textContent = 'Cle privee non disponible. Veuillez vous deconnecter et vous reconnecter.';
-            zoneChargement.style.color = '#a00';
-            return;
-        }
-
-        let privateKey;
-        try {
-            privateKey = await importerClePrivee(privateKeyB64);
-        } catch (e) {
-            zoneChargement.textContent = 'Erreur lors du chargement de la cle privee.';
             zoneChargement.style.color = '#a00';
             return;
         }
@@ -261,26 +239,17 @@
 
         for (const file of filesData) {
             if (!file.encrypted_aes_key) {
-                // Pas de cle de partage: acces refuse a ce fichier
                 lignes.push(`<div style="color:#a00;padding:.5rem 0;">[Fichier #${file.id}: cle de partage introuvable]</div>`);
                 continue;
             }
             try {
-                // Dechiffrer la cle AES avec la cle privee RSA
                 const aesKeyBuffer = await rsaDechiffrerCleAES(privateKey, file.encrypted_aes_key);
                 const aesKey = await importerCleAES(aesKeyBuffer);
-
-                // Dechiffrer le nom de fichier (base64(IV||ciphertext))
                 const filenameBuffer = await aesDechiffrer(aesKey, file.encrypted_filename);
                 const filename = decoder.decode(filenameBuffer);
-
-                // Dechiffrer la date
                 const dateBuffer = await aesDechiffrer(aesKey, file.encrypted_date);
                 const date = decoder.decode(dateBuffer);
-
-                // Stocker dans le cache pour le telechargement
                 decryptedCache.set(file.id, { filename, aesKey });
-
                 lignes.push(renderFichierRow(file.id, filename, date, file.requires_approval, file.approved));
             } catch (e) {
                 lignes.push(`<div style="color:#a00;padding:.5rem 0;">[Fichier #${file.id}: erreur de dechiffrement]</div>`);
@@ -292,11 +261,189 @@
         fichiersListe.style.display = 'block';
     }
 
+    // ── Demandes de suppression en attente ────────────────────────────────────
+
+    function afficherDemandesSuppression() {
+        if (!deletionRequestsData || deletionRequestsData.length === 0) return;
+
+        const section = document.getElementById('section-deletion-requests');
+        const liste = document.getElementById('deletion-requests-liste');
+        section.style.display = 'block';
+
+        liste.innerHTML = deletionRequestsData.map(dr => `
+            <div id="del-req-${dr.id}" style="display:flex;justify-content:space-between;align-items:center;padding:.8rem 0;border-bottom:1px solid #f0f0f0;gap:1rem;flex-wrap:wrap;">
+                <div>
+                    <strong>${escapeHtml(dr.doctor_name)}</strong> demande la suppression du fichier
+                    <span id="del-filename-${dr.file_id}" style="color:#457b9d;">#${dr.file_id}</span>
+                </div>
+                <div style="display:flex;gap:.5rem;flex-shrink:0;">
+                    <button class="btn-del-approve" data-req-id="${dr.id}" data-file-id="${dr.file_id}"
+                        style="font-size:.85rem;padding:.45rem 1rem;background:#c0392b;color:#fff;border:none;border-radius:8px;cursor:pointer;">
+                        Approuver suppression
+                    </button>
+                    <button class="btn-del-reject" data-req-id="${dr.id}"
+                        style="font-size:.85rem;padding:.45rem 1rem;background:#888;color:#fff;border:none;border-radius:8px;cursor:pointer;">
+                        Rejeter
+                    </button>
+                </div>
+            </div>
+        `).join('');
+
+        liste.addEventListener('click', async function(e) {
+            const btnApprove = e.target.closest('.btn-del-approve');
+            const btnReject = e.target.closest('.btn-del-reject');
+            if (btnApprove) {
+                const reqId = btnApprove.dataset.reqId;
+                const fileId = btnApprove.dataset.fileId;
+                if (!confirm('Approuver la suppression ? Le fichier sera definitivement supprime.')) return;
+                await traiterDemandeSuppression(reqId, 'approve', parseInt(fileId, 10));
+            } else if (btnReject) {
+                const reqId = btnReject.dataset.reqId;
+                await traiterDemandeSuppression(reqId, 'reject', null);
+            }
+        });
+
+        // Mise a jour des noms de fichiers depuis le cache (apres chargement)
+        setTimeout(() => {
+            for (const dr of deletionRequestsData) {
+                const cached = decryptedCache.get(dr.file_id);
+                const span = document.getElementById(`del-filename-${dr.file_id}`);
+                if (cached && span) span.textContent = `"${escapeHtml(cached.filename)}"`;
+            }
+        }, 2000);
+    }
+
+    // ── Demandes de modification en attente ───────────────────────────────────
+
+    function afficherDemandesModification() {
+        if (!modificationRequestsData || modificationRequestsData.length === 0) return;
+
+        const section = document.getElementById('section-modification-requests');
+        const liste = document.getElementById('modification-requests-liste');
+        section.style.display = 'block';
+
+        liste.innerHTML = modificationRequestsData.map(mr => `
+            <div id="mod-req-${mr.id}" style="display:flex;justify-content:space-between;align-items:center;padding:.8rem 0;border-bottom:1px solid #f0f0f0;gap:1rem;flex-wrap:wrap;">
+                <div>
+                    <strong>${escapeHtml(mr.doctor_name)}</strong> propose une modification du fichier
+                    <span id="mod-filename-${mr.file_id}" style="color:#457b9d;">#${mr.file_id}</span>
+                </div>
+                <div style="display:flex;gap:.5rem;flex-shrink:0;">
+                    <button class="btn-mod-approve" data-req-id="${mr.id}" data-file-id="${mr.file_id}"
+                        style="font-size:.85rem;padding:.45rem 1rem;background:#2d6a4f;color:#fff;border:none;border-radius:8px;cursor:pointer;">
+                        Approuver modification
+                    </button>
+                    <button class="btn-mod-reject" data-req-id="${mr.id}"
+                        style="font-size:.85rem;padding:.45rem 1rem;background:#888;color:#fff;border:none;border-radius:8px;cursor:pointer;">
+                        Rejeter
+                    </button>
+                </div>
+            </div>
+        `).join('');
+
+        liste.addEventListener('click', async function (e) {
+            const btnApprove = e.target.closest('.btn-mod-approve');
+            const btnReject = e.target.closest('.btn-mod-reject');
+            if (btnApprove) {
+                const reqId = btnApprove.dataset.reqId;
+                const fileId = parseInt(btnApprove.dataset.fileId, 10);
+                if (!confirm('Approuver cette modification ? Le fichier sera remplace.')) return;
+                await traiterDemandeModification(reqId, 'approve', fileId);
+            } else if (btnReject) {
+                const reqId = btnReject.dataset.reqId;
+                await traiterDemandeModification(reqId, 'reject', null);
+            }
+        });
+
+        // Mise a jour des noms depuis le cache
+        setTimeout(() => {
+            for (const mr of modificationRequestsData) {
+                const cached = decryptedCache.get(mr.file_id);
+                const span = document.getElementById(`mod-filename-${mr.file_id}`);
+                if (cached && span) span.textContent = `"${escapeHtml(cached.filename)}"`;
+            }
+        }, 2000);
+    }
+
+    async function traiterDemandeModification(reqId, action, fileId) {
+        try {
+            const url = `{% url 'core:handle_modification_request' 0 'approve' %}`
+                .replace('/0/', `/${reqId}/`)
+                .replace('/approve/', `/${action}/`);
+            const resp = await fetch(url, {
+                method: 'POST',
+                headers: { 'X-CSRFToken': csrfToken, 'Content-Type': 'application/json' },
+                body: '{}',
+            });
+            const data = await resp.json();
+            if (data.success) {
+                const row = document.getElementById(`mod-req-${reqId}`);
+                if (row) row.remove();
+                if (action === 'approve') {
+                    afficherSucces('Modification approuvee. Le fichier a ete mis a jour.');
+                    setTimeout(() => window.location.reload(), 1200);
+                } else {
+                    afficherSucces('Modification rejetee.');
+                }
+                const section = document.getElementById('section-modification-requests');
+                const liste = document.getElementById('modification-requests-liste');
+                if (liste && !liste.querySelector('[id^="mod-req-"]')) {
+                    section.style.display = 'none';
+                }
+            } else {
+                afficherErreur(data.error || 'Erreur.');
+            }
+        } catch (e) {
+            afficherErreur('Erreur lors du traitement de la demande.');
+        }
+    }
+
+    async function traiterDemandeSuppression(reqId, action, fileId) {
+        try {
+            const url = `{% url 'core:handle_deletion_request' 0 'approve' %}`
+                .replace('/0/', `/${reqId}/`)
+                .replace('/approve/', `/${action}/`);
+            const resp = await fetch(url, {
+                method: 'POST',
+                headers: { 'X-CSRFToken': csrfToken, 'Content-Type': 'application/json' },
+                body: '{}',
+            });
+            const data = await resp.json();
+            if (data.success) {
+                const row = document.getElementById(`del-req-${reqId}`);
+                if (row) row.remove();
+                if (action === 'approve') {
+                    afficherSucces('Fichier supprime suite a la demande du medecin.');
+                    if (fileId) {
+                        const fileRow = document.getElementById(`file-row-${fileId}`);
+                        if (fileRow) fileRow.remove();
+                        decryptedCache.delete(fileId);
+                    }
+                    const section = document.getElementById('section-deletion-requests');
+                    const liste = document.getElementById('deletion-requests-liste');
+                    if (liste && !liste.querySelector('[id^="del-req-"]')) {
+                        section.style.display = 'none';
+                    }
+                } else {
+                    afficherSucces('Demande de suppression rejetee.');
+                    const section = document.getElementById('section-deletion-requests');
+                    const liste = document.getElementById('deletion-requests-liste');
+                    if (liste && !liste.querySelector('[id^="del-req-"]')) {
+                        section.style.display = 'none';
+                    }
+                }
+            } else {
+                afficherErreur(data.error || 'Erreur.');
+            }
+        } catch (e) {
+            afficherErreur('Erreur lors du traitement de la demande.');
+        }
+    }
+
     // ── Telechargement ────────────────────────────────────────────────────────
 
     async function telechargerFichier(fileId) {
         try {
-            // Recuperer le fichier chiffre depuis le serveur
             const resp = await fetch(`{% url 'core:download_file' 0 %}`.replace('/0/', `/${fileId}/`));
             if (!resp.ok) {
                 const err = await resp.json();
@@ -305,35 +452,28 @@
             }
             const data = await resp.json();
 
-            // Recuperer la cle AES depuis le cache ou la dechiffrer
             let aesKey = decryptedCache.get(fileId)?.aesKey;
             let filename = decryptedCache.get(fileId)?.filename || `fichier_${fileId}`;
 
             if (!aesKey) {
-                const privateKeyB64 = sessionStorage.getItem('privateKeyPkcs8B64');
-                if (!privateKeyB64) {
+                const privateKey = await KeyStore.getPrivateKey();
+                if (!privateKey) {
                     afficherErreur('Cle privee non disponible. Veuillez vous reconnecter.');
                     return;
                 }
-                const privateKey = await importerClePrivee(privateKeyB64);
                 const aesKeyBuffer = await rsaDechiffrerCleAES(privateKey, data.encrypted_aes_key);
                 aesKey = await importerCleAES(aesKeyBuffer);
-                // Dechiffrer aussi le nom de fichier
                 const decoder = new TextDecoder();
                 const fnBuf = await aesDechiffrer(aesKey, data.encrypted_filename);
                 filename = decoder.decode(fnBuf);
             }
 
-            // Dechiffrer le contenu du fichier (IV separe dans file_iv)
             const fileIv = new Uint8Array(base64ToBuffer(data.file_iv));
             const encryptedBytes = base64ToBuffer(data.encrypted_file);
             const plaintextBuffer = await crypto.subtle.decrypt(
-                { name: 'AES-GCM', iv: fileIv },
-                aesKey,
-                encryptedBytes
+                { name: 'AES-GCM', iv: fileIv }, aesKey, encryptedBytes
             );
 
-            // Declencher le telechargement via un lien temporaire
             const blob = new Blob([plaintextBuffer]);
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -349,6 +489,77 @@
         }
     }
 
+    // ── Ecrasement de fichier ─────────────────────────────────────────────────
+
+    async function ecraser(fileId, nouveauFichier) {
+        const cached = decryptedCache.get(fileId);
+        if (!cached) {
+            afficherErreur('Cle AES introuvable pour ce fichier. Rechargez la page.');
+            return;
+        }
+        const aesKey = cached.aesKey;
+
+        try {
+            const fileBuffer = await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = reject;
+                reader.readAsArrayBuffer(nouveauFichier);
+            });
+
+            // Generer un nouvel IV (JAMAIS reutiliser un IV avec la meme cle)
+            const fileIv = crypto.getRandomValues(new Uint8Array(12));
+            const encryptedFile = await crypto.subtle.encrypt(
+                { name: 'AES-GCM', iv: fileIv }, aesKey, fileBuffer
+            );
+
+            const encoder = new TextEncoder();
+            const encryptedFilename = await aesChiffrer(aesKey, encoder.encode(nouveauFichier.name));
+            const today = new Date().toISOString().split('T')[0];
+            const encryptedDate = await aesChiffrer(aesKey, encoder.encode(today));
+
+            const url = `{% url 'core:api_overwrite_file' 0 %}`.replace('/0/', `/${fileId}/`);
+            const resp = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+                body: JSON.stringify({
+                    encrypted_file: bufferToBase64(encryptedFile),
+                    encrypted_filename: encryptedFilename,
+                    encrypted_date: encryptedDate,
+                    file_iv: bufferToBase64(fileIv.buffer),
+                }),
+            });
+            const data = await resp.json();
+            if (data.success) {
+                decryptedCache.set(fileId, { filename: nouveauFichier.name, aesKey });
+                const nameEl = document.querySelector(`#file-row-${fileId} .file-name`);
+                if (nameEl) nameEl.textContent = nouveauFichier.name;
+                const dateEl = document.querySelector(`#file-row-${fileId} .file-date`);
+                if (dateEl) dateEl.textContent = today;
+                afficherSucces(`Fichier "${escapeHtml(nouveauFichier.name)}" modifie avec succes.`);
+            } else {
+                afficherErreur(data.error || 'Erreur lors de la modification.');
+            }
+        } catch (e) {
+            afficherErreur('Erreur lors du chiffrement : ' + e.message);
+            console.error('Ecrasement:', e);
+        }
+    }
+
+    // Gestionnaire de l'input file hidden pour l'ecrasement
+    document.getElementById('input-overwrite').addEventListener('change', async function() {
+        const file = this.files[0];
+        if (!file || overwriteTargetFileId === null) return;
+        if (file.size > 10 * 1024 * 1024) {
+            afficherErreur('Fichier trop volumineux (max 10 MB).');
+            this.value = '';
+            return;
+        }
+        await ecraser(overwriteTargetFileId, file);
+        this.value = '';
+        overwriteTargetFileId = null;
+    });
+
     // ── Approbation / Rejet d'un fichier medecin ──────────────────────────────
 
     async function approuverFichier(fileId) {
@@ -361,7 +572,6 @@
             const data = await resp.json();
             if (data.success) {
                 afficherSucces('Fichier approuve. Vous pouvez maintenant le telecharger.');
-                // Recharger la page pour mettre a jour la liste
                 setTimeout(() => window.location.reload(), 1200);
             } else {
                 afficherErreur(data.error || 'Erreur lors de l\'approbation.');
@@ -425,16 +635,20 @@
         }
     }
 
-    // ── Delegation des clics (telecharger / supprimer / approuver / rejeter) ──
+    // ── Delegation des clics ──────────────────────────────────────────────────
 
     document.getElementById('fichiers-liste').addEventListener('click', function (e) {
         const btn = e.target.closest('button');
         if (!btn) return;
         const fileId = parseInt(btn.dataset.fileId, 10);
-        if (btn.classList.contains('btn-download')) telechargerFichier(fileId);
-        if (btn.classList.contains('btn-delete'))   supprimerFichier(fileId);
-        if (btn.classList.contains('btn-approve'))  approuverFichier(fileId);
-        if (btn.classList.contains('btn-reject'))   rejeterFichier(fileId);
+        if (btn.classList.contains('btn-download'))  telechargerFichier(fileId);
+        if (btn.classList.contains('btn-delete'))    supprimerFichier(fileId);
+        if (btn.classList.contains('btn-approve'))   approuverFichier(fileId);
+        if (btn.classList.contains('btn-reject'))    rejeterFichier(fileId);
+        if (btn.classList.contains('btn-overwrite')) {
+            overwriteTargetFileId = fileId;
+            document.getElementById('input-overwrite').click();
+        }
     });
 
     // ── Upload ────────────────────────────────────────────────────────────────
@@ -457,7 +671,6 @@
         spinner.style.display = 'inline';
 
         try {
-            // Lire le fichier comme ArrayBuffer
             const fileBuffer = await new Promise((resolve, reject) => {
                 const reader = new FileReader();
                 reader.onload = () => resolve(reader.result);
@@ -465,42 +678,27 @@
                 reader.readAsArrayBuffer(fichier);
             });
 
-            // Generer une cle AES-256 aleatoire pour ce fichier
             const aesKey = await genererCleAES();
             const aesKeyBuffer = await exporterCleAES(aesKey);
 
-            // Chiffrer le fichier avec un IV aleatoire separe
             const fileIv = crypto.getRandomValues(new Uint8Array(12));
             const encryptedFile = await crypto.subtle.encrypt(
-                { name: 'AES-GCM', iv: fileIv },
-                aesKey,
-                fileBuffer
+                { name: 'AES-GCM', iv: fileIv }, aesKey, fileBuffer
             );
 
-            // Chiffrer le nom du fichier (base64(IV||ciphertext))
             const encoder = new TextEncoder();
             const encryptedFilename = await aesChiffrer(aesKey, encoder.encode(fichier.name));
-
-            // Chiffrer la date
             const encryptedDate = await aesChiffrer(aesKey, encoder.encode(dateStr));
 
-            // Recuperer les cles publiques du patient et de ses medecins
             const respKeys = await fetch("{% url 'core:api_patient_doctors_keys' %}");
             if (!respKeys.ok) throw new Error('Impossible de recuperer les cles publiques.');
             const keysData = await respKeys.json();
 
-            // Construire la liste de tous les destinataires (patient + medecins)
             const destinataires = [];
-            if (keysData.patient && keysData.patient.public_key) {
-                destinataires.push(keysData.patient);
-            }
-            for (const doc of (keysData.doctors || [])) {
-                destinataires.push(doc);
-            }
-
+            if (keysData.patient && keysData.patient.public_key) destinataires.push(keysData.patient);
+            for (const doc of (keysData.doctors || [])) destinataires.push(doc);
             if (destinataires.length === 0) throw new Error('Aucune cle publique disponible.');
 
-            // Chiffrer la cle AES pour chaque destinataire avec sa cle publique RSA-OAEP
             const keyShares = [];
             for (const dest of destinataires) {
                 const pubKey = await importerClePublique(dest.public_key);
@@ -508,26 +706,22 @@
                 keyShares.push({ user_id: dest.user_id, encrypted_aes_key: encryptedAesKey });
             }
 
-            // Envoyer les donnees chiffrees au serveur
-            const payload = {
-                encrypted_file: bufferToBase64(encryptedFile),
-                encrypted_filename: encryptedFilename,
-                encrypted_date: encryptedDate,
-                file_iv: bufferToBase64(fileIv.buffer),
-                key_shares: keyShares,
-            };
-
             const respUpload = await fetch("{% url 'core:upload_file' %}", {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
-                body: JSON.stringify(payload),
+                body: JSON.stringify({
+                    encrypted_file: bufferToBase64(encryptedFile),
+                    encrypted_filename: encryptedFilename,
+                    encrypted_date: encryptedDate,
+                    file_iv: bufferToBase64(fileIv.buffer),
+                    key_shares: keyShares,
+                }),
             });
             const result = await respUpload.json();
             if (result.success) {
                 afficherSucces('Fichier chiffre et envoye avec succes.');
                 inputFichier.value = '';
                 inputDate.value = '';
-                // Recharger la page pour afficher le nouveau fichier
                 setTimeout(() => window.location.reload(), 1200);
             } else {
                 afficherErreur(result.error || 'Erreur lors de l\'upload.');
@@ -541,8 +735,11 @@
         }
     });
 
-    // ── Initialisation au chargement de la page ───────────────────────────────
-    chargerFichiers();
+    // ── Initialisation ────────────────────────────────────────────────────────
+    chargerFichiers().then(() => {
+        afficherDemandesSuppression();
+        afficherDemandesModification();
+    });
 })();
 </script>
 {% endblock %}

@@ -1,9 +1,15 @@
 {% extends "base.html" %}
+{% load static %}
 {% block title %}Configurer vos clés de chiffrement{% endblock %}
+
+{% block extra_head %}
+<script src="{% static 'accounts/js/keystore.js' %}"></script>
+{% endblock %}
 
 {% block content %}
 <div class="card" style="max-width:520px; margin:3rem auto;">
-    <h2 style="margin-bottom:.5rem;">🔐 Configurer vos clés</h2>
+    <a href="/" style="color:#457b9d;font-size:.9rem;">← Retour</a>
+    <h2 style="margin-bottom:.5rem;margin-top:.8rem;">🔐 Configurer vos clés</h2>
     <p style="color:#555; margin-bottom:1.5rem; font-size:.95rem;">
         Choisissez une passphrase pour protéger votre clé privée de chiffrement.
         Cette passphrase ne sera <strong>jamais</strong> envoyée au serveur.
@@ -147,6 +153,7 @@
             clePriveeChiffreeB64  : bufferVersBase64(clePriveeChiffree),
             selB64                : bufferVersBase64(sel),
             ivB64                 : bufferVersBase64(iv),
+            clePriveeCryptoKey    : paireCles.privateKey,
         };
     }
 
@@ -214,14 +221,8 @@
                 return;
             }
 
-            // Stocker la clé privée déchiffrée en sessionStorage (disparaît à la fermeture)
-            // Ici on la conserve déjà en clair car on vient de la générer
-            // On re-exporte depuis l'objet CryptoKey n'est pas possible sans la dériver à nouveau,
-            // mais on peut stocker le PKCS8 que l'on a généré avant chiffrement.
-            // Note: cles ne contient pas clePriveePkcs8 directement - on la stocke via un détour.
-            // Plutôt que de stocker la clé brute maintenant, on laisse unlock_keys le faire au prochain login.
-            // La clé sera disponible après le premier "unlock" automatique si on voulait,
-            // mais pour ce premier login on redirige simplement vers le dashboard.
+            // Stocker la CryptoKey non-extractable dans IndexedDB (jamais dans sessionStorage)
+            await KeyStore.storePrivateKey(cles.clePriveeCryptoKey);
 
             // Redirection vers le dashboard
             window.location.href = '/';

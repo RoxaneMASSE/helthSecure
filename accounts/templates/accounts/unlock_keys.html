@@ -1,9 +1,15 @@
 {% extends "base.html" %}
+{% load static %}
 {% block title %}Déverrouiller vos clés{% endblock %}
+
+{% block extra_head %}
+<script src="{% static 'accounts/js/keystore.js' %}"></script>
+{% endblock %}
 
 {% block content %}
 <div class="card" style="max-width:480px; margin:3rem auto;">
-    <h2 style="margin-bottom:.5rem;">🔓 Déverrouiller vos clés</h2>
+    <a href="/" style="color:#457b9d;font-size:.9rem;">← Retour</a>
+    <h2 style="margin-bottom:.5rem;margin-top:.8rem;">🔓 Déverrouiller vos clés</h2>
     <p style="color:#555; margin-bottom:1.5rem; font-size:.95rem;">
         Entrez votre passphrase pour déchiffrer votre clé privée.
         Elle sera conservée uniquement en mémoire de cet onglet.
@@ -123,8 +129,16 @@
             clePriveeChiffree
         );
 
-        // Retourner la clé privée en base64 pour stockage en sessionStorage
-        return bufferVersBase64(clePriveePkcs8);
+        // Importer la clé privée RSA comme CryptoKey non-extractable
+        const clePriveeCryptoKey = await crypto.subtle.importKey(
+            'pkcs8',
+            clePriveePkcs8,
+            { name: 'RSA-OAEP', hash: 'SHA-256' },
+            false,
+            ['decrypt']
+        );
+
+        return clePriveeCryptoKey;
     }
 
     // ── Gestionnaire du formulaire ─────────────────────────────────────────────
@@ -178,9 +192,9 @@
             }
 
             // Déchiffrer la clé privée côté client (jamais envoyée au serveur)
-            let clePriveeB64;
+            let clePriveeCryptoKey;
             try {
-                clePriveeB64 = await deverrouillerClePrivee(
+                clePriveeCryptoKey = await deverrouillerClePrivee(
                     passphrase,
                     donneesChiffrees.encrypted_private_key,
                     donneesChiffrees.key_salt,
@@ -192,9 +206,8 @@
                 return;
             }
 
-            // Stocker la clé privée déchiffrée en sessionStorage
-            // (disparaît automatiquement à la fermeture de l'onglet)
-            sessionStorage.setItem('privateKeyPkcs8B64', clePriveeB64);
+            // Stocker la CryptoKey non-extractable dans IndexedDB (jamais dans sessionStorage)
+            await KeyStore.storePrivateKey(clePriveeCryptoKey);
 
             // Marquer la session comme déverrouillée côté serveur
             const reponsePost = await fetch("{% url 'accounts:api_mark_unlocked' %}", {

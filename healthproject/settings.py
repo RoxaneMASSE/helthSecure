@@ -26,14 +26,17 @@ INSTALLED_APPS = [
     "core",
     "django_extensions",
     "django_recaptcha",
+    "csp",
 ]
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "csp.middleware.CSPMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "accounts.middleware.KeysUnlockMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "mozilla_django_oidc.middleware.SessionRefresh",
@@ -53,6 +56,7 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
+                "csp.context_processors.nonce",
             ],
         },
     },
@@ -109,4 +113,25 @@ LOGIN_URL           = "/oidc/authenticate/"
 RECAPTCHA_PUBLIC_KEY  = config('RECAPTCHA_PUBLIC_KEY')
 RECAPTCHA_PRIVATE_KEY = config('RECAPTCHA_PRIVATE_KEY')
 SILENCED_SYSTEM_CHECKS = ['django_recaptcha.recaptcha_test_key_error']
+
+# ── Content-Security-Policy (django-csp 4.x) ─────────────────────────────────
+# Les templates Django contiennent du JS inline ; les nonces sont disponibles
+# via {{ CSP_NONCE }} dans les templates (context_processor csp.context_processors.nonce).
+# Pour les <script> inline existants, utiliser nonce="{{ CSP_NONCE }}" sur la balise <script>.
+CONTENT_SECURITY_POLICY = {
+    "DIRECTIVES": {
+        "default-src": ["'self'"],
+        # Les templates utilisent du JS inline → autoriser avec nonce
+        "script-src": ["'self'", "'unsafe-inline'", "https://www.google.com", "https://www.gstatic.com"],
+        # Styles inline Django courants
+        "style-src": ["'self'", "'unsafe-inline'"],
+        "connect-src": ["'self'"],
+        "img-src": ["'self'", "data:"],
+        "font-src": ["'self'"],
+        "frame-src": ["'self'", "https://www.google.com"],
+        "frame-ancestors": ["'none'"],
+        # OIDC redirige vers Keycloak
+        "form-action": ["'self'", config('KEYCLOAK_URL', default='http://localhost:8080')],
+    },
+}
 

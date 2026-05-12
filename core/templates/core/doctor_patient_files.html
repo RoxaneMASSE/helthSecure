@@ -1,14 +1,19 @@
 {% extends "base.html" %}
+{% load static %}
 {% block title %}Fichiers medicaux — {{ patient.email|default:patient.username }}{% endblock %}
+
+{% block extra_head %}
+<script src="{% static 'accounts/js/keystore.js' %}"></script>
+{% endblock %}
 
 {% block content %}
 <div class="card">
-    <h2>
+    <a href="{% url 'core:my_patients' %}" style="color:#457b9d;font-size:.9rem;">← Retour a mes patients</a>
+    <h2 style="margin-top:.8rem;">
         Fichiers medicaux du patient
         <span style="color:#888;font-size:.9rem;font-weight:400;">{{ patient.email|default:patient.username }}</span>
         <span class="badge-doctor">Medecin</span>
     </h2>
-    <a href="{% url 'core:my_patients' %}" style="color:#457b9d;font-size:.9rem;">← Retour a mes patients</a>
 </div>
 
 <div id="zone-erreur" class="alert alert-error" style="display:none;"></div>
@@ -46,6 +51,9 @@
     <div id="fichiers-liste" style="display:none;"></div>
 </div>
 
+<!-- Input file cache pour la proposition de modification -->
+<input type="file" id="input-modify" style="display:none;">
+
 <script>
 (function () {
     'use strict';
@@ -54,8 +62,8 @@
     const patientId = {{ patient_id }};
     const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
 
-    // Cache en memoire: {id -> {filename, aesKey}}
     const decryptedCache = new Map();
+    let modifyTargetFileId = null;
 
     // ── Utilitaires base64 <-> ArrayBuffer ────────────────────────────────────
 
@@ -74,13 +82,6 @@
     }
 
     // ── Fonctions crypto ──────────────────────────────────────────────────────
-
-    async function importerClePrivee(b64) {
-        return crypto.subtle.importKey(
-            'pkcs8', base64ToBuffer(b64),
-            { name: 'RSA-OAEP', hash: 'SHA-256' }, false, ['decrypt']
-        );
-    }
 
     async function importerClePublique(b64) {
         return crypto.subtle.importKey(
@@ -101,7 +102,6 @@
         return crypto.subtle.importKey('raw', rawBuffer, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
     }
 
-    // Chiffre des donnees avec AES-GCM; retourne base64(IV || ciphertext)
     async function aesChiffrer(cleAes, donnees) {
         const iv = crypto.getRandomValues(new Uint8Array(12));
         const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, cleAes, donnees);
@@ -111,7 +111,6 @@
         return bufferToBase64(resultat.buffer);
     }
 
-    // Dechiffre un base64(IV || ciphertext) avec AES-GCM; retourne ArrayBuffer
     async function aesDechiffrer(cleAes, b64IvCiphertext) {
         const buf = base64ToBuffer(b64IvCiphertext);
         const iv = new Uint8Array(buf, 0, 12);
@@ -152,21 +151,46 @@
             .replace(/"/g, '&quot;');
     }
 
-    // ── Rendu d'une ligne de fichier (lecture seule pour medecin) ─────────────
+    // ── Rendu d'une ligne de fichier ──────────────────────────────────────────
 
-    function renderFichierRow(fileId, filename, date, requiresApproval, approved) {
+    function renderFichierRow(fileId, filename, date, requiresApproval, approved, deletionPending, modificationPending) {
         const badge = requiresApproval && !approved
             ? '<span style="color:#9a6700;background:#fff7e6;padding:.15rem .5rem;border-radius:8px;font-size:.8rem;margin-left:.5rem;">En attente d\'approbation</span>'
             : '';
+
+        const modBtn = modificationPending
+            ? `<button class="btn-request-modify" data-file-id="${fileId}" disabled
+                style="font-size:.85rem;padding:.45rem 1rem;background:#ccc;color:#666;border:none;border-radius:8px;cursor:not-allowed;flex-shrink:0;">
+                Modification demandee
+               </button>`
+            : `<button class="btn-request-modify" data-file-id="${fileId}"
+                style="font-size:.85rem;padding:.45rem 1rem;background:#457b9d;color:#fff;border:none;border-radius:8px;cursor:pointer;flex-shrink:0;">
+                Proposer modification
+               </button>`;
+
+        const delBtn = deletionPending
+            ? `<button class="btn-request-delete" data-file-id="${fileId}" disabled
+                style="font-size:.85rem;padding:.45rem 1rem;background:#ccc;color:#666;border:none;border-radius:8px;cursor:not-allowed;flex-shrink:0;">
+                Suppression demandee
+               </button>`
+            : `<button class="btn-request-delete" data-file-id="${fileId}"
+                style="font-size:.85rem;padding:.45rem 1rem;background:#c0392b;color:#fff;border:none;border-radius:8px;cursor:pointer;flex-shrink:0;">
+                Demander suppression
+               </button>`;
+
         return `
         <div id="file-row-${fileId}" style="display:flex;justify-content:space-between;align-items:center;padding:.8rem 0;border-bottom:1px solid #f0f0f0;gap:1rem;flex-wrap:wrap;">
             <div>
                 <strong>${escapeHtml(filename)}</strong>${badge}<br>
                 <span style="color:#888;font-size:.85rem;">${escapeHtml(date)}</span>
             </div>
-            <button class="btn btn-primary btn-download" data-file-id="${fileId}" style="font-size:.85rem;padding:.45rem 1rem;flex-shrink:0;">
-                Telecharger
-            </button>
+            <div style="display:flex;gap:.5rem;flex-shrink:0;flex-wrap:wrap;">
+                <button class="btn btn-primary btn-download" data-file-id="${fileId}" style="font-size:.85rem;padding:.45rem 1rem;">
+                    Telecharger
+                </button>
+                ${modBtn}
+                ${delBtn}
+            </div>
         </div>`;
     }
 
@@ -181,18 +205,9 @@
             return;
         }
 
-        const privateKeyB64 = sessionStorage.getItem('privateKeyPkcs8B64');
-        if (!privateKeyB64) {
+        const privateKey = await KeyStore.getPrivateKey();
+        if (!privateKey) {
             zoneChargement.textContent = 'Cle privee non disponible. Veuillez vous reconnecter.';
-            zoneChargement.style.color = '#a00';
-            return;
-        }
-
-        let privateKey;
-        try {
-            privateKey = await importerClePrivee(privateKeyB64);
-        } catch (e) {
-            zoneChargement.textContent = 'Erreur lors du chargement de la cle privee.';
             zoneChargement.style.color = '#a00';
             return;
         }
@@ -213,7 +228,11 @@
                 const dateBuf = await aesDechiffrer(aesKey, file.encrypted_date);
                 const date = decoder.decode(dateBuf);
                 decryptedCache.set(file.id, { filename, aesKey });
-                lignes.push(renderFichierRow(file.id, filename, date, file.requires_approval, file.approved));
+                lignes.push(renderFichierRow(
+                    file.id, filename, date,
+                    file.requires_approval, file.approved,
+                    file.deletion_pending, file.modification_pending
+                ));
             } catch (e) {
                 lignes.push(`<div style="color:#a00;padding:.5rem 0;">[Fichier #${file.id}: erreur de dechiffrement]</div>`);
             }
@@ -240,21 +259,17 @@
             let filename = decryptedCache.get(fileId)?.filename || `fichier_${fileId}`;
 
             if (!aesKey) {
-                const privateKeyB64 = sessionStorage.getItem('privateKeyPkcs8B64');
-                if (!privateKeyB64) { afficherErreur('Cle privee non disponible.'); return; }
-                const privateKey = await importerClePrivee(privateKeyB64);
+                const privateKey = await KeyStore.getPrivateKey();
+                if (!privateKey) { afficherErreur('Cle privee non disponible.'); return; }
                 const aesKeyBuf = await rsaDechiffrerCleAES(privateKey, data.encrypted_aes_key);
                 aesKey = await importerCleAES(aesKeyBuf);
                 const fnBuf = await aesDechiffrer(aesKey, data.encrypted_filename);
                 filename = new TextDecoder().decode(fnBuf);
             }
 
-            // Dechiffrer le fichier (IV separe dans file_iv)
             const fileIv = new Uint8Array(base64ToBuffer(data.file_iv));
             const plaintextBuffer = await crypto.subtle.decrypt(
-                { name: 'AES-GCM', iv: fileIv },
-                aesKey,
-                base64ToBuffer(data.encrypted_file)
+                { name: 'AES-GCM', iv: fileIv }, aesKey, base64ToBuffer(data.encrypted_file)
             );
 
             const blob = new Blob([plaintextBuffer]);
@@ -272,13 +287,123 @@
         }
     }
 
+    // ── Demande de suppression ────────────────────────────────────────────────
+
+    async function demanderSuppression(fileId) {
+        const filename = decryptedCache.get(fileId)?.filename || `#${fileId}`;
+        if (!confirm(`Demander la suppression de "${filename}" ? Le patient devra approuver.`)) return;
+        try {
+            const url = `{% url 'core:request_file_deletion' 0 %}`.replace('/0/', `/${fileId}/`);
+            const resp = await fetch(url, {
+                method: 'POST',
+                headers: { 'X-CSRFToken': csrfToken, 'Content-Type': 'application/json' },
+                body: '{}',
+            });
+            const data = await resp.json();
+            if (data.success) {
+                afficherSucces(data.message || 'Demande envoyee au patient.');
+                const btn = document.querySelector(`#file-row-${fileId} .btn-request-delete`);
+                if (btn) {
+                    btn.textContent = 'Suppression demandee';
+                    btn.disabled = true;
+                    btn.style.background = '#ccc';
+                    btn.style.color = '#666';
+                    btn.style.cursor = 'not-allowed';
+                }
+            } else {
+                afficherErreur(data.message || 'Erreur lors de la demande.');
+            }
+        } catch (e) {
+            afficherErreur('Erreur lors de la demande de suppression.');
+        }
+    }
+
+    // ── Proposition de modification ───────────────────────────────────────────
+
+    async function proposerModification(fileId) {
+        modifyTargetFileId = fileId;
+        document.getElementById('input-modify').click();
+    }
+
+    document.getElementById('input-modify').addEventListener('change', async function () {
+        const file = this.files[0];
+        if (!file || modifyTargetFileId === null) return;
+        if (file.size > 10 * 1024 * 1024) {
+            afficherErreur('Fichier trop volumineux (max 10 MB).');
+            this.value = '';
+            return;
+        }
+
+        const fileId = modifyTargetFileId;
+        this.value = '';
+        modifyTargetFileId = null;
+
+        const cachedName = decryptedCache.get(fileId)?.filename || `#${fileId}`;
+        if (!confirm(`Proposer ce fichier comme modification de "${cachedName}" ? Le patient devra approuver.`)) return;
+
+        try {
+            const cached = decryptedCache.get(fileId);
+            if (!cached) throw new Error('Cle AES introuvable. Rechargez la page.');
+            const aesKey = cached.aesKey;
+
+            const fileBuffer = await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = reject;
+                reader.readAsArrayBuffer(file);
+            });
+
+            // Generer un nouvel IV (JAMAIS reutiliser un IV avec la meme cle)
+            const fileIv = crypto.getRandomValues(new Uint8Array(12));
+            const encryptedFile = await crypto.subtle.encrypt(
+                { name: 'AES-GCM', iv: fileIv }, aesKey, fileBuffer
+            );
+
+            const encoder = new TextEncoder();
+            const encryptedFilename = await aesChiffrer(aesKey, encoder.encode(file.name));
+            const today = new Date().toISOString().split('T')[0];
+            const encryptedDate = await aesChiffrer(aesKey, encoder.encode(today));
+
+            const url = `{% url 'core:request_file_modification' 0 %}`.replace('/0/', `/${fileId}/`);
+            const resp = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+                body: JSON.stringify({
+                    new_encrypted_file: bufferToBase64(encryptedFile),
+                    new_file_iv: bufferToBase64(fileIv.buffer),
+                    new_encrypted_filename: encryptedFilename,
+                    new_encrypted_date: encryptedDate,
+                }),
+            });
+            const data = await resp.json();
+            if (data.success) {
+                afficherSucces(data.message || 'Demande envoyee au patient.');
+                const btn = document.querySelector(`#file-row-${fileId} .btn-request-modify`);
+                if (btn) {
+                    btn.textContent = 'Modification demandee';
+                    btn.disabled = true;
+                    btn.style.background = '#ccc';
+                    btn.style.color = '#666';
+                    btn.style.cursor = 'not-allowed';
+                }
+            } else {
+                afficherErreur(data.error || 'Erreur lors de la demande.');
+            }
+        } catch (e) {
+            afficherErreur('Erreur : ' + e.message);
+            console.error('Proposition modification:', e);
+        }
+    });
+
     // ── Delegation des clics ──────────────────────────────────────────────────
 
     document.getElementById('fichiers-liste').addEventListener('click', function (e) {
         const btn = e.target.closest('button');
         if (!btn) return;
         const fileId = parseInt(btn.dataset.fileId, 10);
-        if (btn.classList.contains('btn-download')) telechargerFichier(fileId);
+        if (btn.classList.contains('btn-download'))                          telechargerFichier(fileId);
+        if (btn.classList.contains('btn-request-delete') && !btn.disabled)  demanderSuppression(fileId);
+        if (btn.classList.contains('btn-request-modify') && !btn.disabled)  proposerModification(fileId);
     });
 
     // ── Upload (medecin → patient, requires_approval=True) ────────────────────
@@ -311,7 +436,6 @@
             const aesKey = await genererCleAES();
             const aesKeyBuffer = await exporterCleAES(aesKey);
 
-            // Chiffrer le fichier avec un IV aleatoire separe
             const fileIv = crypto.getRandomValues(new Uint8Array(12));
             const encryptedFile = await crypto.subtle.encrypt(
                 { name: 'AES-GCM', iv: fileIv }, aesKey, fileBuffer
@@ -321,19 +445,14 @@
             const encryptedFilename = await aesChiffrer(aesKey, encoder.encode(fichier.name));
             const encryptedDate = await aesChiffrer(aesKey, encoder.encode(dateStr));
 
-            // Recuperer les cles publiques du patient et de ses medecins associes
             const urlKeys = `{% url 'core:api_doctor_patient_keys' 0 %}`.replace('/0/', `/${patientId}/`);
             const respKeys = await fetch(urlKeys);
             if (!respKeys.ok) throw new Error('Impossible de recuperer les cles publiques.');
             const keysData = await respKeys.json();
 
             const destinataires = [];
-            if (keysData.patient && keysData.patient.public_key) {
-                destinataires.push(keysData.patient);
-            }
-            for (const doc of (keysData.doctors || [])) {
-                destinataires.push(doc);
-            }
+            if (keysData.patient && keysData.patient.public_key) destinataires.push(keysData.patient);
+            for (const doc of (keysData.doctors || [])) destinataires.push(doc);
             if (destinataires.length === 0) throw new Error('Aucune cle publique disponible.');
 
             const keyShares = [];
@@ -373,7 +492,6 @@
         }
     });
 
-    // ── Initialisation ────────────────────────────────────────────────────────
     chargerFichiers();
 })();
 </script>

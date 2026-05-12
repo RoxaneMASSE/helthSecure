@@ -74,3 +74,48 @@ class FileKeyShare(models.Model):
 
     class Meta:
         unique_together = ("file", "user")
+
+
+class FileDeletionRequest(models.Model):
+    # Demande de suppression d'un fichier medical, initiee par un medecin, validee par le patient.
+    STATUS_PENDING = "pending"
+    STATUS_APPROVED = "approved"
+    STATUS_REJECTED = "rejected"
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Pending"),
+        (STATUS_APPROVED, "Approved"),
+        (STATUS_REJECTED, "Rejected"),
+    ]
+
+    file = models.ForeignKey(MedicalFile, on_delete=models.CASCADE, related_name="deletion_requests")
+    doctor = models.ForeignKey(User, on_delete=models.CASCADE, related_name="deletion_requests_sent")
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=STATUS_PENDING)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("file", "doctor")
+        
+        
+class FileModificationRequest(models.Model):
+    STATUS_PENDING = "pending"
+    STATUS_APPROVED = "approved"
+    STATUS_REJECTED = "rejected"
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Pending"),
+        (STATUS_APPROVED, "Approved"),
+        (STATUS_REJECTED, "Rejected"),
+    ]
+
+    file = models.ForeignKey(MedicalFile, on_delete=models.CASCADE, related_name="modification_requests")
+    doctor = models.ForeignKey(User, on_delete=models.CASCADE, related_name="modification_requests_sent")
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=STATUS_PENDING)
+    new_encrypted_file = models.BinaryField()
+    new_file_iv = models.CharField(max_length=255)
+    new_encrypted_filename = models.TextField()
+    new_encrypted_date = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("file", "doctor")

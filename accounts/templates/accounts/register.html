@@ -7,8 +7,8 @@
 
 {% block content %}
 <div class="card" style="max-width:560px; margin:0 auto;">
-    <h2 style="margin-bottom:1.5rem;">Create an account</h2>
-
+    <a href="{% url 'oidc_authentication_init' %}" style="color:#457b9d;font-size:.9rem;">← Back to login</a>
+    <h2 style="margin-bottom:1.5rem;margin-top:.8rem;">Create an account</h2>
     <!-- Role selector tabs -->
     <div style="display:flex; gap:.5rem; margin-bottom:1.5rem;">
         <a href="?role=patient"
