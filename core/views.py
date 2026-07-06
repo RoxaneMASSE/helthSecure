@@ -16,21 +16,21 @@ from .models import DoctorAppointmentRequest, DoctorProfile, FileDeletionRequest
 def home(request):
     if request.user.is_authenticated:
         try:
-            # Vider le cache du profil pour relire depuis la BDD
+            # Clear the profile cache to reload it from the database
             if hasattr(request.user, '_userprofile_cache'):
                 del request.user._userprofile_cache
             from accounts.models import UserProfile
             profile = UserProfile.objects.get(user=request.user)
 
-            # Étape 1 : si les clés RSA E2E ne sont pas encore générées → setup
+            # Step 1: if the E2E RSA keys have not been generated yet -> setup
             if not profile.public_key:
                 return redirect("accounts:setup_keys")
 
-            # Étape 2 : si les clés ne sont pas déverrouillées pour cette session → unlock
+            # Step 2: if the keys are not unlocked for this session -> unlock
             if not request.session.get("keys_unlocked"):
                 return redirect("accounts:unlock_keys")
 
-            # Étape 3 : rediriger vers le bon dashboard selon le rôle
+            # Step 3: redirect to the right dashboard depending on the role
             role = profile.role
             return redirect("core:dashboard_doctor" if role == "doctor" else "core:dashboard_patient")
         except Exception:
@@ -70,7 +70,7 @@ def dashboard_patient(request):
 @login_required
 @role_required("patient")
 def my_doctors(request):
-    # Liste des medecins du patient + demandes recues en attente.
+    # List of the patient's doctors + pending received requests.
     doctors = request.user.patient_profile.doctors.select_related("doctor_profile").all()
     pending_requests = DoctorAppointmentRequest.objects.filter(
         patient=request.user,
@@ -87,10 +87,10 @@ def my_doctors(request):
 @role_required("patient")
 @require_POST
 def add_doctor(request):
-    # Ajout direct d'un medecin a la liste du patient.
+    # Direct addition of a doctor to the patient's list.
     doctor_id = request.POST.get("doctor_id")
     if not doctor_id:
-        messages.error(request, "Medecin invalide.")
+        messages.error(request, "Invalid doctor.")
         return redirect("core:my_doctors")
 
     doctor = get_object_or_404(
@@ -100,14 +100,14 @@ def add_doctor(request):
     )
     patient_profile = request.user.patient_profile
     if patient_profile.doctors.filter(id=doctor.id).exists():
-        messages.info(request, "Ce medecin est deja associe.")
+        messages.info(request, "This doctor is already associated.")
         return redirect("core:my_doctors")
 
     patient_profile.doctors.add(doctor)
     DoctorAppointmentRequest.objects.filter(doctor=doctor, patient=request.user).update(
         status=DoctorAppointmentRequest.STATUS_APPROVED
     )
-    messages.success(request, "Medecin ajoute avec succes.")
+    messages.success(request, "Doctor added successfully.")
     return redirect("core:my_doctors")
 
 
@@ -115,12 +115,12 @@ def add_doctor(request):
 @role_required("patient")
 @require_POST
 def remove_doctor(request, doctor_id):
-    # Retrait du medecin + suppression des partages de cles sur les fichiers du patient.
+    # Removes the doctor + deletes the key shares on the patient's files.
     patient_profile = request.user.patient_profile
     doctor = get_object_or_404(User, id=doctor_id, userprofile__role="doctor")
 
     if not patient_profile.doctors.filter(id=doctor.id).exists():
-        messages.error(request, "Ce medecin n'est pas associe a votre profil.")
+        messages.error(request, "This doctor is not associated with your profile.")
         return redirect("core:my_doctors")
 
     patient_profile.doctors.remove(doctor)
@@ -128,7 +128,7 @@ def remove_doctor(request, doctor_id):
     DoctorAppointmentRequest.objects.filter(doctor=doctor, patient=request.user).update(
         status=DoctorAppointmentRequest.STATUS_REJECTED
     )
-    messages.success(request, "Medecin retire et acces aux cles supprime.")
+    messages.success(request, "Doctor removed and key access revoked.")
     return redirect("core:my_doctors")
 
 
@@ -136,23 +136,23 @@ def remove_doctor(request, doctor_id):
 @role_required("patient")
 @require_POST
 def handle_request(request, request_id, action):
-    # Approbation/rejet d'une demande de suivi de patient.
+    # Approve/reject a patient follow-up request.
     appointment_request = get_object_or_404(DoctorAppointmentRequest, id=request_id, patient=request.user)
     if appointment_request.status != DoctorAppointmentRequest.STATUS_PENDING:
-        messages.error(request, "Cette demande a deja ete traitee.")
+        messages.error(request, "This request has already been processed.")
         return redirect("core:my_doctors")
 
     if action == "approve":
         request.user.patient_profile.doctors.add(appointment_request.doctor)
         appointment_request.status = DoctorAppointmentRequest.STATUS_APPROVED
         appointment_request.save(update_fields=["status", "updated_at"])
-        messages.success(request, "Demande approuvee.")
+        messages.success(request, "Request approved.")
     elif action == "reject":
         appointment_request.status = DoctorAppointmentRequest.STATUS_REJECTED
         appointment_request.save(update_fields=["status", "updated_at"])
-        messages.info(request, "Demande rejetee.")
+        messages.info(request, "Request rejected.")
     else:
-        messages.error(request, "Action invalide.")
+        messages.error(request, "Invalid action.")
 
     return redirect("core:my_doctors")
 
@@ -162,7 +162,7 @@ def handle_request(request, request_id, action):
 @require_GET
 @ratelimit(key="user_or_ip", rate="20/m", method="GET", block=True)
 def search_doctors(request):
-    # Recherche des medecins par nom/prenom.
+    # Search doctors by first/last name.
     query = (request.GET.get("q") or "").strip()
     if len(query) < 2:
         return JsonResponse({"results": []})
@@ -190,9 +190,9 @@ def search_doctors(request):
 @login_required
 @role_required("doctor")
 def my_patients(request):
-    # Liste des patients suivis + demandes envoyees.
-    # Note: request.user.patients = M2M vers User (patients suivis par ce doctor)
-    # On recupere les PatientProfile associes via l'utilisateur patient
+    # List of followed patients + sent requests.
+    # Note: request.user.patients = M2M to User (patients followed by this doctor)
+    # We retrieve the associated PatientProfile via the patient user
     patients = request.user.patients.all()
     sent_requests = DoctorAppointmentRequest.objects.filter(doctor=request.user).select_related("patient")
     context = {
@@ -204,17 +204,29 @@ def my_patients(request):
 
 @login_required
 @role_required("doctor")
+def medical_records(request):
+    # Simplified view: just the list of followed patients with quick access
+    # to their files. No follow-request search/management here (see my_patients).
+    patients = request.user.patients.all()
+    context = {
+        "patients": patients,
+    }
+    return render(request, "core/medical_records.html", context)
+
+
+@login_required
+@role_required("doctor")
 @require_POST
 def request_patient(request):
-    # Envoi d'une demande pour suivre un patient.
+    # Send a request to follow a patient.
     patient_id = request.POST.get("patient_id")
     if not patient_id:
-        messages.error(request, "Patient invalide.")
+        messages.error(request, "Invalid patient.")
         return redirect("core:my_patients")
 
     patient = get_object_or_404(User.objects.select_related("userprofile"), id=patient_id, userprofile__role="patient")
     if request.user.patients.filter(id=patient.id).exists():
-        messages.info(request, "Vous suivez deja ce patient.")
+        messages.info(request, "You already follow this patient.")
         return redirect("core:my_patients")
 
     appointment_request, created = DoctorAppointmentRequest.objects.get_or_create(
@@ -223,15 +235,15 @@ def request_patient(request):
         defaults={"status": DoctorAppointmentRequest.STATUS_PENDING},
     )
     if created:
-        messages.success(request, "Demande envoyee au patient.")
+        messages.success(request, "Request sent to the patient.")
     elif appointment_request.status == DoctorAppointmentRequest.STATUS_REJECTED:
         appointment_request.status = DoctorAppointmentRequest.STATUS_PENDING
         appointment_request.save(update_fields=["status", "updated_at"])
-        messages.success(request, "Demande renvoyee au patient.")
+        messages.success(request, "Request re-sent to the patient.")
     elif appointment_request.status == DoctorAppointmentRequest.STATUS_PENDING:
-        messages.info(request, "Une demande est deja en attente pour ce patient.")
+        messages.info(request, "A request is already pending for this patient.")
     else:
-        messages.info(request, "Vous suivez deja ce patient.")
+        messages.info(request, "You already follow this patient.")
 
     return redirect("core:my_patients")
 
@@ -241,12 +253,12 @@ def request_patient(request):
 @require_GET
 @ratelimit(key="user_or_ip", rate="20/m", method="GET", block=True)
 def search_patients(request):
-    # Recherche des patients par username OU email.
+    # Search patients by username OR email.
     query = (request.GET.get("q") or "").strip()
     if len(query) < 2:
         return JsonResponse({"results": []})
 
-    # Chercher dans username ou email, et verifier que c'est bien un patient
+    # Search in username or email, and verify it is indeed a patient
     patients = User.objects.filter(
         userprofile__role="patient"
     ).filter(
@@ -267,12 +279,12 @@ def search_patients(request):
     )
 
 
-# ── Fichiers medicaux E2E ─────────────────────────────────────────────────────
+# ── E2E medical files ─────────────────────────────────────────────────────────
 
 @login_required
 @role_required("patient")
 def medical_files(request):
-    """Page principale: liste des fichiers medicaux chiffres du patient."""
+    """Main page: list of the patient's encrypted medical files."""
     files = (
         MedicalFile.objects
         .filter(patient=request.user)
@@ -292,7 +304,7 @@ def medical_files(request):
             "approved": f.approved,
         })
 
-    # Demandes de suppression en attente pour les fichiers de ce patient
+    # Pending deletion requests for this patient's files
     pending_deletion_requests = (
         FileDeletionRequest.objects
         .filter(file__patient=request.user, status=FileDeletionRequest.STATUS_PENDING)
@@ -310,7 +322,7 @@ def medical_files(request):
             "doctor_name": doctor_name,
         })
 
-    # Demandes de modification en attente
+    # Pending modification requests
     pending_modification_requests = (
         FileModificationRequest.objects
         .filter(file__patient=request.user, status=FileModificationRequest.STATUS_PENDING)
@@ -329,8 +341,8 @@ def medical_files(request):
             "new_encrypted_filename": mr.new_encrypted_filename,
             "new_encrypted_date": mr.new_encrypted_date,
             "new_file_iv": mr.new_file_iv,
-            # Note : le nouveau fichier chiffré n'est pas transmis ici,
-            # il sera récupéré au moment de l'approbation côté serveur.
+            # Note: the new encrypted file itself is not sent here,
+            # it will be fetched at approval time on the server side.
         })
 
     return render(request, "core/medical_files.html", {
@@ -344,7 +356,7 @@ def medical_files(request):
 @role_required("patient")
 @require_POST
 def upload_file(request):
-    """Recoit les donnees chiffrees E2E et stocke le fichier medical."""
+    """Receives the E2E encrypted data and stores the medical file."""
     try:
         data = json.loads(request.body)
         encrypted_file_b64 = data["encrypted_file"]
@@ -355,7 +367,7 @@ def upload_file(request):
 
         encrypted_file_bytes = base64.b64decode(encrypted_file_b64)
         if len(encrypted_file_bytes) > 10 * 1024 * 1024:
-            return JsonResponse({"error": "Fichier trop volumineux (max 10 MB)."}, status=400)
+            return JsonResponse({"error": "File too large (max 10 MB)."}, status=400)
 
         medical_file = MedicalFile.objects.create(
             patient=request.user,
@@ -381,14 +393,14 @@ def upload_file(request):
 
 @login_required
 def download_file(request, file_id):
-    """Retourne le fichier chiffre et la cle AES chiffree pour l'utilisateur connecte."""
+    """Returns the encrypted file and the encrypted AES key for the logged-in user."""
     medical_file = get_object_or_404(MedicalFile, id=file_id)
 
-    # Bloquer le telechargement si le fichier necessite une approbation non encore accordee
+    # Block the download if the file requires approval that has not been granted yet
     if medical_file.requires_approval and not medical_file.approved:
-        return JsonResponse({"error": "Ce fichier n'a pas encore ete approuve par le patient."}, status=403)
+        return JsonResponse({"error": "This file has not been approved by the patient yet."}, status=403)
 
-    # Verifier que l'utilisateur est le patient OU un medecin associe
+    # Check that the user is the patient OR an associated doctor
     is_patient = (medical_file.patient_id == request.user.id)
     is_doctor = False
     try:
@@ -399,10 +411,10 @@ def download_file(request, file_id):
         pass
 
     if not (is_patient or is_doctor):
-        return JsonResponse({"error": "Acces refuse."}, status=403)
+        return JsonResponse({"error": "Access denied."}, status=403)
 
     ks = get_object_or_404(FileKeyShare, file=medical_file, user=request.user)
-    # Encoder le contenu binaire en base64 pour le transport JSON
+    # Encode the binary content in base64 for JSON transport
     encrypted_file_b64 = base64.b64encode(bytes(medical_file.encrypted_file)).decode()
     return JsonResponse({
         "encrypted_file": encrypted_file_b64,
@@ -416,36 +428,36 @@ def download_file(request, file_id):
 @role_required("patient")
 @require_POST
 def approve_file(request, file_id):
-    """Approbation ou rejet d'un fichier medical uploade par un medecin.
-    Seul le patient proprietaire du fichier peut approuver ou rejeter."""
+    """Approve or reject a medical file uploaded by a doctor.
+    Only the owning patient can approve or reject it."""
     medical_file = get_object_or_404(MedicalFile, id=file_id, patient=request.user)
 
-    # Verifier que le fichier necessite bien une approbation
+    # Check that the file actually requires approval
     if not medical_file.requires_approval:
-        return JsonResponse({"error": "Ce fichier ne necessite pas d'approbation."}, status=400)
+        return JsonResponse({"error": "This file does not require approval."}, status=400)
 
     action = request.POST.get("action")
 
     if action == "approve":
-        # Marquer le fichier comme approuve
+        # Mark the file as approved
         medical_file.approved = True
         medical_file.save(update_fields=["approved"])
         return JsonResponse({"success": True, "action": "approved"})
 
     elif action == "reject":
-        # Supprimer le fichier et tous ses partages de cles
+        # Delete the file and all its key shares
         medical_file.delete()
         return JsonResponse({"success": True, "action": "rejected"})
 
     else:
-        return JsonResponse({"error": "Action invalide. Utilisez 'approve' ou 'reject'."}, status=400)
+        return JsonResponse({"error": "Invalid action. Use 'approve' or 'reject'."}, status=400)
 
 
 @login_required
 @role_required("patient")
 @require_POST
 def delete_file(request, file_id):
-    """Supprime un fichier medical et tous ses partages de cles."""
+    """Deletes a medical file and all its key shares."""
     medical_file = get_object_or_404(MedicalFile, id=file_id, patient=request.user)
     medical_file.delete()
     return JsonResponse({"success": True})
@@ -455,7 +467,7 @@ def delete_file(request, file_id):
 @role_required("patient")
 @require_GET
 def api_patient_doctors_keys(request):
-    """Retourne la cle publique du patient et de ses medecins associes."""
+    """Returns the patient's public key and those of the associated doctors."""
     patient_public_key = None
     try:
         patient_public_key = request.user.userprofile.public_key
@@ -489,16 +501,16 @@ def api_patient_doctors_keys(request):
 @login_required
 @role_required("doctor")
 def doctor_patient_files(request, patient_id):
-    """Affiche les fichiers medicaux d'un patient pour le medecin associe."""
+    """Displays a patient's medical files for the associated doctor."""
     patient = get_object_or_404(User, id=patient_id, userprofile__role="patient")
-    # Verifier que le medecin est associe au patient
+    # Check that the doctor is associated with the patient
     try:
         is_associated = patient.patient_profile.doctors.filter(id=request.user.id).exists()
     except Exception:
         is_associated = False
 
     if not is_associated:
-        messages.error(request, "Vous n'etes pas associe a ce patient.")
+        messages.error(request, "You are not associated with this patient.")
         return redirect("core:my_patients")
 
     files = (
@@ -510,7 +522,7 @@ def doctor_patient_files(request, patient_id):
     files_data = []
     for f in files:
         ks = f.key_shares.filter(user=request.user).first()
-        # Verifier s'il y a deja une demande de suppression en attente par CE medecin
+        # Check whether there is already a pending deletion request by THIS doctor
         pending_del = f.deletion_requests.filter(
             doctor=request.user, status=FileDeletionRequest.STATUS_PENDING
         ).exists()
@@ -541,7 +553,7 @@ def doctor_patient_files(request, patient_id):
 @role_required("doctor")
 @require_POST
 def doctor_upload_file(request, patient_id):
-    """Upload d'un fichier par un medecin pour un patient. Necessite validation patient."""
+    """Upload of a file by a doctor for a patient. Requires patient validation."""
     patient = get_object_or_404(User, id=patient_id, userprofile__role="patient")
     try:
         is_associated = patient.patient_profile.doctors.filter(id=request.user.id).exists()
@@ -549,7 +561,7 @@ def doctor_upload_file(request, patient_id):
         is_associated = False
 
     if not is_associated:
-        return JsonResponse({"error": "Acces refuse."}, status=403)
+        return JsonResponse({"error": "Access denied."}, status=403)
 
     try:
         data = json.loads(request.body)
@@ -561,7 +573,7 @@ def doctor_upload_file(request, patient_id):
 
         encrypted_file_bytes = base64.b64decode(encrypted_file_b64)
         if len(encrypted_file_bytes) > 10 * 1024 * 1024:
-            return JsonResponse({"error": "Fichier trop volumineux (max 10 MB)."}, status=400)
+            return JsonResponse({"error": "File too large (max 10 MB)."}, status=400)
 
         medical_file = MedicalFile.objects.create(
             patient=patient,
@@ -588,14 +600,14 @@ def doctor_upload_file(request, patient_id):
 @login_required
 @require_GET
 def api_user_public_key(request, user_id):
-    """Retourne la cle publique RSA d'un utilisateur (medecin ou patient). Acces connecte."""
+    """Returns a user's RSA public key (doctor or patient). Requires login."""
     user = get_object_or_404(User, id=user_id)
     try:
         public_key = user.userprofile.public_key
     except Exception:
         public_key = None
     if not public_key:
-        return JsonResponse({"error": "Cle publique introuvable."}, status=404)
+        return JsonResponse({"error": "Public key not found."}, status=404)
     return JsonResponse({"user_id": user_id, "public_key": public_key})
 
 
@@ -603,8 +615,8 @@ def api_user_public_key(request, user_id):
 @role_required("patient")
 @require_GET
 def api_my_file_keys(request):
-    """Retourne tous les FileKeyShare du patient connecte (file_id + encrypted_aes_key).
-    Utilise pour le re-chiffrement lors de l'ajout d'un nouveau medecin."""
+    """Returns all FileKeyShare records for the logged-in patient (file_id + encrypted_aes_key).
+    Used for re-encryption when adding a new doctor."""
     key_shares = (
         FileKeyShare.objects
         .filter(file__patient=request.user, user=request.user)
@@ -624,8 +636,8 @@ def api_my_file_keys(request):
 @role_required("patient")
 @require_POST
 def api_add_file_key_shares(request):
-    """Recoit une liste de {file_id, user_id, encrypted_aes_key} et cree les FileKeyShare.
-    Verifie que chaque fichier appartient bien au patient connecte avant creation."""
+    """Receives a list of {file_id, user_id, encrypted_aes_key} and creates the FileKeyShare records.
+    Checks that each file actually belongs to the logged-in patient before creation."""
     try:
         data = json.loads(request.body)
         shares = data.get("shares", [])
@@ -636,11 +648,11 @@ def api_add_file_key_shares(request):
             user_id = share["user_id"]
             encrypted_aes_key = share["encrypted_aes_key"]
 
-            # Verifier que le fichier appartient au patient connecte
+            # Check that the file belongs to the logged-in patient
             medical_file = get_object_or_404(MedicalFile, id=file_id, patient=request.user)
             target_user = get_object_or_404(User, id=user_id)
 
-            # Creer ou mettre a jour le FileKeyShare (evite les doublons)
+            # Create or update the FileKeyShare (avoids duplicates)
             FileKeyShare.objects.update_or_create(
                 file=medical_file,
                 user=target_user,
@@ -657,7 +669,7 @@ def api_add_file_key_shares(request):
 @role_required("patient")
 @require_POST
 def api_overwrite_file(request, file_id):
-    """Ecrase le contenu chiffre d'un fichier existant. La cle AES (FileKeyShare) reste inchangee."""
+    """Overwrites the encrypted content of an existing file. The AES key (FileKeyShare) is left unchanged."""
     medical_file = get_object_or_404(MedicalFile, id=file_id, patient=request.user)
     try:
         data = json.loads(request.body)
@@ -668,7 +680,7 @@ def api_overwrite_file(request, file_id):
 
         encrypted_file_bytes = base64.b64decode(encrypted_file_b64)
         if len(encrypted_file_bytes) > 10 * 1024 * 1024:
-            return JsonResponse({"error": "Fichier trop volumineux (max 10 MB)."}, status=400)
+            return JsonResponse({"error": "File too large (max 10 MB)."}, status=400)
 
         medical_file.encrypted_file = encrypted_file_bytes
         medical_file.encrypted_filename = encrypted_filename
@@ -685,17 +697,17 @@ def api_overwrite_file(request, file_id):
 @role_required("doctor")
 @require_POST
 def request_file_deletion(request, file_id):
-    """Le medecin demande la suppression d'un fichier du patient."""
+    """The doctor requests the deletion of a patient's file."""
     medical_file = get_object_or_404(MedicalFile, id=file_id)
 
-    # Verifier que le medecin est associe au patient proprietaire du fichier
+    # Check that the doctor is associated with the owning patient
     try:
         is_associated = medical_file.patient.patient_profile.doctors.filter(id=request.user.id).exists()
     except Exception:
         is_associated = False
 
     if not is_associated:
-        return JsonResponse({"error": "Acces refuse."}, status=403)
+        return JsonResponse({"error": "Access denied."}, status=403)
 
     deletion_req, created = FileDeletionRequest.objects.get_or_create(
         file=medical_file,
@@ -706,17 +718,17 @@ def request_file_deletion(request, file_id):
         if deletion_req.status == FileDeletionRequest.STATUS_REJECTED:
             deletion_req.status = FileDeletionRequest.STATUS_PENDING
             deletion_req.save(update_fields=["status", "updated_at"])
-            return JsonResponse({"success": True, "message": "Demande renvoyee."})
-        return JsonResponse({"success": False, "message": "Une demande est deja en cours."})
+            return JsonResponse({"success": True, "message": "Request re-sent."})
+        return JsonResponse({"success": False, "message": "A request is already in progress."})
 
-    return JsonResponse({"success": True, "message": "Demande envoyee au patient."})
+    return JsonResponse({"success": True, "message": "Request sent to the patient."})
 
 
 @login_required
 @role_required("doctor")
 @require_POST
 def request_file_modification(request, file_id):
-    """Le médecin propose une modification chiffrée d'un fichier patient."""
+    """The doctor proposes an encrypted modification of a patient's file."""
     medical_file = get_object_or_404(MedicalFile, id=file_id)
 
     try:
@@ -725,7 +737,7 @@ def request_file_modification(request, file_id):
         is_associated = False
 
     if not is_associated:
-        return JsonResponse({"error": "Accès refusé."}, status=403)
+        return JsonResponse({"error": "Access denied."}, status=403)
 
     try:
         data = json.loads(request.body)
@@ -736,21 +748,21 @@ def request_file_modification(request, file_id):
 
         new_encrypted_file_bytes = base64.b64decode(new_encrypted_file_b64)
         if len(new_encrypted_file_bytes) > 10 * 1024 * 1024:
-            return JsonResponse({"error": "Fichier trop volumineux (max 10 MB)."}, status=400)
+            return JsonResponse({"error": "File too large (max 10 MB)."}, status=400)
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=400)
 
-    # Si une demande existe déjà (même fichier, même médecin)
+    # If a request already exists (same file, same doctor)
     try:
         mod_req = FileModificationRequest.objects.get(file=medical_file, doctor=request.user)
-        # On la remplace si elle a été rejetée ou est déjà en attente
+        # Replace it if it was rejected or is already pending
         mod_req.new_encrypted_file = new_encrypted_file_bytes
         mod_req.new_file_iv = new_file_iv
         mod_req.new_encrypted_filename = new_encrypted_filename
         mod_req.new_encrypted_date = new_encrypted_date
         mod_req.status = FileModificationRequest.STATUS_PENDING
         mod_req.save()
-        return JsonResponse({"success": True, "message": "Demande mise à jour et renvoyée au patient."})
+        return JsonResponse({"success": True, "message": "Request updated and re-sent to the patient."})
     except FileModificationRequest.DoesNotExist:
         pass
 
@@ -763,14 +775,14 @@ def request_file_modification(request, file_id):
         new_encrypted_filename=new_encrypted_filename,
         new_encrypted_date=new_encrypted_date,
     )
-    return JsonResponse({"success": True, "message": "Demande envoyée au patient."})
+    return JsonResponse({"success": True, "message": "Request sent to the patient."})
 
 
 @login_required
 @role_required("patient")
 @require_POST
 def handle_deletion_request(request, request_id, action):
-    """Le patient approuve ou rejette une demande de suppression de fichier."""
+    """The patient approves or rejects a file deletion request."""
     deletion_req = get_object_or_404(
         FileDeletionRequest,
         id=request_id,
@@ -780,21 +792,21 @@ def handle_deletion_request(request, request_id, action):
 
     if action == "approve":
         medical_file = deletion_req.file
-        medical_file.delete()  # supprime aussi les FileKeyShare et les demandes liees (CASCADE)
+        medical_file.delete()  # also deletes the related FileKeyShare rows and requests (CASCADE)
         return JsonResponse({"success": True, "action": "approved"})
     elif action == "reject":
         deletion_req.status = FileDeletionRequest.STATUS_REJECTED
         deletion_req.save(update_fields=["status", "updated_at"])
         return JsonResponse({"success": True, "action": "rejected"})
     else:
-        return JsonResponse({"error": "Action invalide."}, status=400)
+        return JsonResponse({"error": "Invalid action."}, status=400)
 
 
 @login_required
 @role_required("patient")
 @require_POST
 def handle_modification_request(request, request_id, action):
-    """Le patient approuve ou rejette une demande de modification de fichier."""
+    """The patient approves or rejects a file modification request."""
     mod_req = get_object_or_404(
         FileModificationRequest,
         id=request_id,
@@ -817,14 +829,14 @@ def handle_modification_request(request, request_id, action):
         mod_req.save(update_fields=["status", "updated_at"])
         return JsonResponse({"success": True, "action": "rejected"})
     else:
-        return JsonResponse({"error": "Action invalide."}, status=400)
+        return JsonResponse({"error": "Invalid action."}, status=400)
 
 
 @login_required
 @role_required("doctor")
 @require_GET
 def api_doctor_patient_keys(request, patient_id):
-    """Retourne les cles publiques du patient et de ses medecins (pour upload medecin)."""
+    """Returns the public keys of the patient and their doctors (for doctor upload)."""
     patient = get_object_or_404(User, id=patient_id, userprofile__role="patient")
     try:
         is_associated = patient.patient_profile.doctors.filter(id=request.user.id).exists()
@@ -832,16 +844,16 @@ def api_doctor_patient_keys(request, patient_id):
         is_associated = False
 
     if not is_associated:
-        return JsonResponse({"error": "Acces refuse."}, status=403)
+        return JsonResponse({"error": "Access denied."}, status=403)
 
-    # Cle publique du patient
+    # Patient's public key
     patient_public_key = None
     try:
         patient_public_key = patient.userprofile.public_key
     except Exception:
         pass
 
-    # Cles publiques de tous les medecins associes au patient
+    # Public keys of all doctors associated with the patient
     doctors_list = []
     try:
         for doctor in patient.patient_profile.doctors.select_related("userprofile").all():

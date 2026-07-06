@@ -1,10 +1,10 @@
 /**
- * keystore.js — Gestion sécurisée de la clé privée RSA dans IndexedDB.
+ * keystore.js — Secure storage of the RSA private key in IndexedDB.
  *
- * La clé privée est stockée comme CryptoKey non-extractable (extractable=false)
- * dans IndexedDB. Un flag dans sessionStorage indique que la session est active.
- * Si le flag n'est pas présent au chargement (onglet fermé puis rouvert), la
- * clé est supprimée d'IndexedDB (nettoyage automatique).
+ * The private key is stored as a non-extractable CryptoKey (extractable=false)
+ * in IndexedDB. A flag in sessionStorage indicates that the session is active.
+ * If the flag is not present on load (tab closed then reopened), the key is
+ * removed from IndexedDB (automatic cleanup).
  */
 (function (global) {
     'use strict';
@@ -15,7 +15,7 @@
     const KEY_ID     = 'privateKey';
     const SESSION_FLAG = 'ks_session_active';
 
-    // ── Ouverture / création de la base ──────────────────────────────────────
+    // ── Opening / creating the database ───────────────────────────────────────
 
     function openDB() {
         return new Promise(function (resolve, reject) {
@@ -28,13 +28,13 @@
         });
     }
 
-    // ── API publique ──────────────────────────────────────────────────────────
+    // ── Public API ───────────────────────────────────────────────────────────
 
     /**
-     * Stocke un objet CryptoKey non-extractable dans IndexedDB et pose le flag
-     * de session dans sessionStorage.
+     * Stores a non-extractable CryptoKey object in IndexedDB and sets the
+     * session flag in sessionStorage.
      *
-     * @param {CryptoKey} cryptoKey  Clé privée RSA-OAEP (extractable=false, usage=['decrypt'])
+     * @param {CryptoKey} cryptoKey  RSA-OAEP private key (extractable=false, usage=['decrypt'])
      */
     async function storePrivateKey(cryptoKey) {
         const db = await openDB();
@@ -48,7 +48,7 @@
     }
 
     /**
-     * Retourne la CryptoKey stockée, ou null si elle n'est pas disponible.
+     * Returns the stored CryptoKey, or null if it is not available.
      */
     async function getPrivateKey() {
         const db = await openDB();
@@ -61,7 +61,7 @@
     }
 
     /**
-     * Supprime la clé d'IndexedDB et retire le flag de session.
+     * Deletes the key from IndexedDB and clears the session flag.
      */
     async function clearKeys() {
         const db = await openDB();
@@ -75,8 +75,8 @@
     }
 
     /**
-     * Indique si une clé est disponible (flag session présent ET clé en base).
-     * À appeler en async pour une vérification complète.
+     * Indicates whether a key is available (session flag present AND key in store).
+     * Should be called asynchronously for a full check.
      */
     async function isKeyAvailable() {
         if (!sessionStorage.getItem(SESSION_FLAG)) return false;
@@ -84,16 +84,16 @@
         return key !== null;
     }
 
-    // ── Nettoyage au chargement ───────────────────────────────────────────────
-    // Si le flag sessionStorage est absent (onglet fermé/nouveau démarrage),
-    // on purge IndexedDB pour éviter une clé orpheline.
+    // ── Cleanup on load ────────────────────────────────────────────────────────
+    // If the sessionStorage flag is absent (tab closed / fresh start), purge
+    // IndexedDB to avoid an orphaned key.
     (async function cleanupOnLoad() {
         if (!sessionStorage.getItem(SESSION_FLAG)) {
             try { await clearKeys(); } catch (_) {}
         }
     })();
 
-    // ── Export global ─────────────────────────────────────────────────────────
+    // ── Global export ────────────────────────────────────────────────────────
     global.KeyStore = {
         storePrivateKey : storePrivateKey,
         getPrivateKey   : getPrivateKey,

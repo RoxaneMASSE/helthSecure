@@ -3,12 +3,12 @@ from django.db import models
 
 
 class PatientProfile(models.Model):
-    # Profil patient: les donnees d'identite restent chiffrees E2E cote client.
+    # Patient profile: identity data stays E2E encrypted client-side.
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="patient_profile")
     first_name_encrypted = models.TextField(blank=True, null=True)
     last_name_encrypted = models.TextField(blank=True, null=True)
     date_of_birth_encrypted = models.TextField(blank=True, null=True)
-    # Medecins autorises a acceder aux donnees de ce patient.
+    # Doctors authorized to access this patient's data.
     doctors = models.ManyToManyField(
         User,
         related_name="patients",
@@ -19,7 +19,7 @@ class PatientProfile(models.Model):
 
 
 class DoctorProfile(models.Model):
-    # Profil medecin (utilisateur de confiance), infos en clair.
+    # Doctor profile (trusted user), plaintext info.
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="doctor_profile")
     first_name = models.CharField(max_length=255)
     last_name = models.CharField(max_length=255)
@@ -28,7 +28,7 @@ class DoctorProfile(models.Model):
 
 
 class DoctorAppointmentRequest(models.Model):
-    # Demande de mise en relation medecin-patient avec workflow d'approbation.
+    # Doctor-patient relationship request with approval workflow.
     STATUS_PENDING = "pending"
     STATUS_APPROVED = "approved"
     STATUS_REJECTED = "rejected"
@@ -49,24 +49,24 @@ class DoctorAppointmentRequest(models.Model):
 
 
 class MedicalFile(models.Model):
-    # Fichier medical chiffre E2E; le serveur ne voit jamais les donnees en clair.
+    # E2E encrypted medical file; the server never sees the plaintext data.
     patient = models.ForeignKey(User, on_delete=models.CASCADE, related_name="medical_files")
-    # Contenu binaire du fichier chiffre cote client (AES).
+    # Binary content of the file, encrypted client-side (AES).
     encrypted_file = models.BinaryField()
-    # Metadonnees sensibles chiffrees cote client.
+    # Sensitive metadata, encrypted client-side.
     encrypted_filename = models.TextField()
     encrypted_date = models.TextField()
-    # IV utilise pour le chiffrement AES du fichier.
+    # IV used for AES encryption of the file.
     file_iv = models.CharField(max_length=255)
     uploaded_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name="uploaded_files")
-    # True si le fichier est uploade par un medecin et necessite validation patient.
+    # True if the file was uploaded by a doctor and requires patient validation.
     requires_approval = models.BooleanField(default=False)
     approved = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
 
 class FileKeyShare(models.Model):
-    # Partage de la cle AES d'un fichier, chiffree avec la cle publique RSA du destinataire.
+    # Share of a file's AES key, encrypted with the recipient's RSA public key.
     file = models.ForeignKey(MedicalFile, on_delete=models.CASCADE, related_name="key_shares")
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="file_key_shares")
     encrypted_aes_key = models.TextField()
@@ -77,7 +77,7 @@ class FileKeyShare(models.Model):
 
 
 class FileDeletionRequest(models.Model):
-    # Demande de suppression d'un fichier medical, initiee par un medecin, validee par le patient.
+    # Request to delete a medical file, initiated by a doctor, validated by the patient.
     STATUS_PENDING = "pending"
     STATUS_APPROVED = "approved"
     STATUS_REJECTED = "rejected"

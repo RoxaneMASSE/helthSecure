@@ -8,7 +8,7 @@ urlpatterns = [
     path("profil/", views.profil, name="profil"),
     path("acces-refuse/", views.acces_refuse, name="acces_refuse"),
     path("logout/", views.logout_view, name="logout"),
-    # Gestion des clés RSA E2E
+    # E2E RSA key management
     path("setup-keys/", views.setup_keys, name="setup_keys"),
     path("unlock-keys/", views.unlock_keys, name="unlock_keys"),
     path("api/store-keys/", views.api_store_keys, name="api_store_keys"),

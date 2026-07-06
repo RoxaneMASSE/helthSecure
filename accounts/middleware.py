@@ -1,7 +1,7 @@
 from django.shortcuts import redirect
 
 
-# ── URLs exclues du contrôle clés ────────────────────────────────────────────
+# ── URLs excluded from the key check ─────────────────────────────────────────
 _EXCLUDED_PREFIXES = (
     '/accounts/setup-keys/',
     '/accounts/unlock-keys/',
@@ -15,8 +15,8 @@ _EXCLUDED_PREFIXES = (
 
 class KeysUnlockMiddleware:
     """
-    Redirige l'utilisateur vers setup-keys (première fois) ou unlock-keys
-    (logins suivants) si ses clés E2E ne sont pas déverrouillées pour la session.
+    Redirects the user to setup-keys (first time) or unlock-keys
+    (subsequent logins) if their E2E keys are not unlocked for the session.
     """
 
     def __init__(self, get_response):
@@ -60,7 +60,7 @@ class NoCacheMiddleware:
             response['Cache-Control'] = 'no-store, no-cache, must-revalidate, private'
             response['Pragma'] = 'no-cache'
             response['Expires'] = '0'
-            # Désactive le bfcache du navigateur — c'est ce qui cause le problème
+            # Disables the browser's bfcache — this is what causes the issue
             response['Clear-Site-Data'] = '"cache"'
 
         return response

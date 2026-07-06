@@ -12,15 +12,15 @@
         <p style="color:#888;margin:.5rem 0 1rem;">
             Assigned patients
             {% if sent_requests_pending_count > 0 %}
-                ({{ sent_requests_pending_count }} demande{{ sent_requests_pending_count|pluralize }} envoyee{{ sent_requests_pending_count|pluralize }} en attente)
+                ({{ sent_requests_pending_count }} request{{ sent_requests_pending_count|pluralize }} sent, pending)
             {% endif %}
         </p>
         <a href="{% url 'core:my_patients' %}" class="btn btn-primary">Check patients</a>
     </div>
     <div class="card">
         <h3>📁 Medical records</h3>
-        <p style="color:#888;margin:.5rem 0 1rem;">Manage medical records</p>
-        <a href="{% url 'core:my_patients' %}" class="btn btn-primary">Check records</a>
+        <p style="color:#888;margin:.5rem 0 1rem;">Quick access to your patients' files</p>
+        <a href="{% url 'core:medical_records' %}" class="btn btn-primary">Check records</a>
     </div>
 </div>
 {% endblock %}

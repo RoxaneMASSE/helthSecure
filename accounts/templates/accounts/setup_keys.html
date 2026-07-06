@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% load static %}
-{% block title %}Configurer vos clés de chiffrement{% endblock %}
+{% block title %}Set up your encryption keys{% endblock %}
 
 {% block extra_head %}
 <script src="{% static 'accounts/js/keystore.js' %}"></script>
@@ -8,14 +8,14 @@
 
 {% block content %}
 <div class="card" style="max-width:520px; margin:3rem auto;">
-    <a href="/" style="color:#457b9d;font-size:.9rem;">← Retour</a>
-    <h2 style="margin-bottom:.5rem;margin-top:.8rem;">🔐 Configurer vos clés</h2>
+    <a href="/" style="color:#457b9d;font-size:.9rem;">← Back</a>
+    <h2 style="margin-bottom:.5rem;margin-top:.8rem;">🔐 Set up your keys</h2>
     <p style="color:#555; margin-bottom:1.5rem; font-size:.95rem;">
-        Choisissez une passphrase pour protéger votre clé privée de chiffrement.
-        Cette passphrase ne sera <strong>jamais</strong> envoyée au serveur.
+        Choose a passphrase to protect your encryption private key.
+        This passphrase will <strong>never</strong> be sent to the server.
     </p>
 
-    <div id="zone-erreur" class="alert alert-error" style="display:none;"></div>
+    <div id="error-zone" class="alert alert-error" style="display:none;"></div>
 
     <form id="form-setup" autocomplete="off">
         {% csrf_token %}
@@ -31,12 +31,12 @@
                 required
                 autocomplete="new-password"
                 style="width:100%; padding:.6rem .8rem; border:1px solid #ccc; border-radius:8px; font-size:1rem;"
-                placeholder="Au moins 8 caractères"
+                placeholder="At least 8 characters"
             >
         </div>
         <div style="margin-bottom:1.5rem;">
             <label for="passphrase-confirm" style="display:block; font-weight:600; margin-bottom:.4rem;">
-                Confirmer la passphrase
+                Confirm passphrase
             </label>
             <input
                 type="password"
@@ -46,23 +46,23 @@
                 required
                 autocomplete="new-password"
                 style="width:100%; padding:.6rem .8rem; border:1px solid #ccc; border-radius:8px; font-size:1rem;"
-                placeholder="Répéter la passphrase"
+                placeholder="Repeat the passphrase"
             >
         </div>
-        <button type="submit" class="btn btn-primary" id="btn-generer" style="width:100%; padding:.75rem;">
-            Générer mes clés
+        <button type="submit" class="btn btn-primary" id="btn-generate" style="width:100%; padding:.75rem;">
+            Generate my keys
         </button>
     </form>
 
-    <!-- Spinner affiché pendant la génération -->
-    <div id="zone-chargement" style="display:none; text-align:center; margin-top:1.5rem;">
+    <!-- Spinner shown while generating -->
+    <div id="loading-zone" style="display:none; text-align:center; margin-top:1.5rem;">
         <div id="spinner" style="
             width:40px; height:40px; border:4px solid #d0e4f0;
             border-top-color:#457b9d; border-radius:50%;
             animation:spin .8s linear infinite; margin:0 auto 1rem;
         "></div>
-        <p style="color:#457b9d; font-weight:600;">Génération de vos clés en cours…</p>
-        <p style="color:#888; font-size:.85rem;">Cela peut prendre quelques secondes.</p>
+        <p style="color:#457b9d; font-weight:600;">Generating your keys…</p>
+        <p style="color:#888; font-size:.85rem;">This may take a few seconds.</p>
     </div>
 </div>
 
@@ -70,33 +70,33 @@
     @keyframes spin { to { transform: rotate(360deg); } }
 </style>
 
-<script>
+<script nonce="{{ CSP_NONCE }}">
 (function () {
     'use strict';
 
-    // ── Utilitaires de conversion ──────────────────────────────────────────────
+    // ── Conversion utilities ──────────────────────────────────────────────────
 
     /**
-     * Convertit un ArrayBuffer en chaîne base64.
+     * Converts an ArrayBuffer to a base64 string.
      */
-    function bufferVersBase64(buffer) {
-        const octets = new Uint8Array(buffer);
-        let binaire = '';
-        for (let i = 0; i < octets.length; i++) {
-            binaire += String.fromCharCode(octets[i]);
+    function bufferToBase64(buffer) {
+        const bytes = new Uint8Array(buffer);
+        let binary = '';
+        for (let i = 0; i < bytes.length; i++) {
+            binary += String.fromCharCode(bytes[i]);
         }
-        return btoa(binaire);
+        return btoa(binary);
     }
 
-    // ── Génération et chiffrement des clés ────────────────────────────────────
+    // ── Key generation and encryption ─────────────────────────────────────────
 
     /**
-     * Génère une paire RSA-OAEP, chiffre la clé privée avec AES-GCM
-     * dérivé via PBKDF2 depuis la passphrase, et retourne tout en base64.
+     * Generates an RSA-OAEP key pair, encrypts the private key with AES-GCM
+     * derived via PBKDF2 from the passphrase, and returns everything as base64.
      */
-    async function genererEtChiffrerCles(passphrase) {
-        // 1. Générer la paire de clés RSA-OAEP 2048 bits
-        const paireCles = await crypto.subtle.generateKey(
+    async function generateAndEncryptKeys(passphrase) {
+        // 1. Generate the RSA-OAEP 2048-bit key pair
+        const keyPair = await crypto.subtle.generateKey(
             {
                 name: 'RSA-OAEP',
                 modulusLength: 2048,
@@ -107,19 +107,19 @@
             ['encrypt', 'decrypt']
         );
 
-        // 2. Exporter la clé publique au format SPKI
-        const clePubliqueSpki = await crypto.subtle.exportKey('spki', paireCles.publicKey);
+        // 2. Export the public key in SPKI format
+        const publicKeySpki = await crypto.subtle.exportKey('spki', keyPair.publicKey);
 
-        // 3. Exporter la clé privée au format PKCS8
-        const clePriveePkcs8 = await crypto.subtle.exportKey('pkcs8', paireCles.privateKey);
+        // 3. Export the private key in PKCS8 format
+        const privateKeyPkcs8 = await crypto.subtle.exportKey('pkcs8', keyPair.privateKey);
 
-        // 4. Générer un sel aléatoire (16 octets) et un IV aléatoire (12 octets)
-        const sel = crypto.getRandomValues(new Uint8Array(16));
+        // 4. Generate a random salt (16 bytes) and a random IV (12 bytes)
+        const salt = crypto.getRandomValues(new Uint8Array(16));
         const iv  = crypto.getRandomValues(new Uint8Array(12));
 
-        // 5. Importer la passphrase comme matériel de clé PBKDF2
+        // 5. Import the passphrase as PBKDF2 key material
         const encoder = new TextEncoder();
-        const materielCle = await crypto.subtle.importKey(
+        const keyMaterial = await crypto.subtle.importKey(
             'raw',
             encoder.encode(passphrase),
             { name: 'PBKDF2' },
@@ -127,110 +127,110 @@
             ['deriveKey']
         );
 
-        // 6. Dériver une clé AES-256-GCM via PBKDF2 (100 000 itérations, SHA-256)
-        const cleAes = await crypto.subtle.deriveKey(
+        // 6. Derive an AES-256-GCM key via PBKDF2 (100,000 iterations, SHA-256)
+        const aesKey = await crypto.subtle.deriveKey(
             {
                 name: 'PBKDF2',
-                salt: sel,
+                salt: salt,
                 iterations: 100000,
                 hash: 'SHA-256',
             },
-            materielCle,
+            keyMaterial,
             { name: 'AES-GCM', length: 256 },
             false,
             ['encrypt']
         );
 
-        // 7. Chiffrer la clé privée avec AES-GCM
-        const clePriveeChiffree = await crypto.subtle.encrypt(
+        // 7. Encrypt the private key with AES-GCM
+        const encryptedPrivateKey = await crypto.subtle.encrypt(
             { name: 'AES-GCM', iv: iv },
-            cleAes,
-            clePriveePkcs8
+            aesKey,
+            privateKeyPkcs8
         );
 
         return {
-            clePubliqueB64        : bufferVersBase64(clePubliqueSpki),
-            clePriveeChiffreeB64  : bufferVersBase64(clePriveeChiffree),
-            selB64                : bufferVersBase64(sel),
-            ivB64                 : bufferVersBase64(iv),
-            clePriveeCryptoKey    : paireCles.privateKey,
+            publicKeyB64          : bufferToBase64(publicKeySpki),
+            encryptedPrivateKeyB64: bufferToBase64(encryptedPrivateKey),
+            saltB64               : bufferToBase64(salt),
+            ivB64                 : bufferToBase64(iv),
+            privateCryptoKey      : keyPair.privateKey,
         };
     }
 
-    // ── Gestionnaire du formulaire ─────────────────────────────────────────────
+    // ── Form handler ─────────────────────────────────────────────────────────
 
     const form          = document.getElementById('form-setup');
-    const zoneErreur    = document.getElementById('zone-erreur');
-    const zoneChargement= document.getElementById('zone-chargement');
-    const btnGenerer    = document.getElementById('btn-generer');
-    const csrfToken     = document.querySelector('[name=csrfmiddlewaretoken]').value;
+    const errorZone     = document.getElementById('error-zone');
+    const loadingZone   = document.getElementById('loading-zone');
+    const btnGenerate   = document.getElementById('btn-generate');
+    const csrfToken      = document.querySelector('[name=csrfmiddlewaretoken]').value;
 
-    function afficherErreur(message) {
-        zoneErreur.textContent = message;
-        zoneErreur.style.display = 'block';
-        zoneChargement.style.display = 'none';
-        btnGenerer.disabled = false;
+    function showError(message) {
+        errorZone.textContent = message;
+        errorZone.style.display = 'block';
+        loadingZone.style.display = 'none';
+        btnGenerate.disabled = false;
     }
 
     form.addEventListener('submit', async function (e) {
         e.preventDefault();
-        zoneErreur.style.display = 'none';
+        errorZone.style.display = 'none';
 
         const passphrase = document.getElementById('passphrase').value;
         const confirmation = document.getElementById('passphrase-confirm').value;
 
-        // Validation de la passphrase
+        // Passphrase validation
         if (passphrase.length < 8) {
-            afficherErreur('La passphrase doit contenir au moins 8 caractères.');
+            showError('The passphrase must be at least 8 characters long.');
             return;
         }
         if (passphrase !== confirmation) {
-            afficherErreur('Les deux passphrases ne correspondent pas.');
+            showError('The two passphrases do not match.');
             return;
         }
 
-        // Afficher le spinner et désactiver le bouton
-        btnGenerer.disabled = true;
+        // Show the spinner and disable the button
+        btnGenerate.disabled = true;
         form.style.display = 'none';
-        zoneChargement.style.display = 'block';
+        loadingZone.style.display = 'block';
 
         try {
-            // Générer et chiffrer les clés côté client
-            const cles = await genererEtChiffrerCles(passphrase);
+            // Generate and encrypt the keys client-side
+            const keys = await generateAndEncryptKeys(passphrase);
 
-            // Envoyer les données chiffrées au serveur (jamais la clé privée en clair)
-            const reponse = await fetch("{% url 'accounts:api_store_keys' %}", {
+            // Send the encrypted data to the server (never the plaintext private key)
+            const response = await fetch("{% url 'accounts:api_store_keys' %}", {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'X-CSRFToken': csrfToken,
                 },
                 body: JSON.stringify({
-                    public_key            : cles.clePubliqueB64,
-                    encrypted_private_key : cles.clePriveeChiffreeB64,
-                    key_salt              : cles.selB64,
-                    key_iv                : cles.ivB64,
+                    public_key            : keys.publicKeyB64,
+                    encrypted_private_key : keys.encryptedPrivateKeyB64,
+                    key_salt              : keys.saltB64,
+                    key_iv                : keys.ivB64,
                 }),
             });
 
-            const resultat = await reponse.json();
+            const result = await response.json();
 
-            if (!resultat.success) {
+            if (!result.success) {
                 form.style.display = 'block';
-                afficherErreur(resultat.error || 'Erreur lors de la sauvegarde des clés.');
+                showError(result.error || 'Error while saving the keys.');
                 return;
             }
 
-            // Stocker la CryptoKey non-extractable dans IndexedDB (jamais dans sessionStorage)
-            await KeyStore.storePrivateKey(cles.clePriveeCryptoKey);
+            // Store the non-extractable CryptoKey in IndexedDB (never in sessionStorage)
+            await KeyStore.storePrivateKey(keys.privateCryptoKey);
 
-            // Redirection vers le dashboard
+            // Redirect to the dashboard
             window.location.href = '/';
 
-        } catch (erreur) {
+        } catch (error) {
             form.style.display = 'block';
-            afficherErreur('Une erreur est survenue lors de la génération des clés. Veuillez réessayer.');
-            console.error('Erreur génération clés:', erreur);
+            showError('An error occurred while generating the keys. Please try again.');
+            console.error('Key generation error:', error);
         }
     });
 })();

@@ -111,7 +111,6 @@ def register(request):
 
 
 
-
 @login_required
 @never_cache
 def profil(request):
@@ -128,35 +127,35 @@ def acces_refuse(request):
 from django.contrib.auth import logout as django_logout
 
 def logout_view(request):
-    # 1. Récupérer l'ID Token avant de vider la session
+    # 1. Retrieve the ID token before clearing the session
     id_token = request.session.get('oidc_id_token')
-    
-    # 2. Déconnexion de Django
+
+    # 2. Log out of Django
     django_logout(request)
-    
-    # 3. Construire l'URL de logout Keycloak
+
+    # 3. Build the Keycloak logout URL
     endpoint = f"{settings.KEYCLOAK_URL}/realms/{settings.KEYCLOAK_REALM}/protocol/openid-connect/logout"
-    
+
     params = {
         "client_id": settings.OIDC_RP_CLIENT_ID,
-        "post_logout_redirect_uri": "http://localhost:8000/", # Doit correspondre EXACTEMENT à Keycloak
+        "post_logout_redirect_uri": "http://localhost:8000/", # Must match EXACTLY what is configured in Keycloak
     }
-    
+
     if id_token:
         params["id_token_hint"] = id_token
-        
+
     return redirect(f"{endpoint}?{urlencode(params)}")
 
 
-# ── Gestion des clés RSA E2E ──────────────────────────────────────────────────
+# ── E2E RSA key management ────────────────────────────────────────────────────
 
 @login_required
 @never_cache
 def setup_keys(request):
-    """Page de génération des clés RSA (premier login, aucune clé configurée)."""
+    """RSA key generation page (first login, no key configured yet)."""
     try:
         profile = request.user.userprofile
-        # Si les clés sont déjà configurées, retour au flux normal
+        # If keys are already configured, go back to the normal flow
         if profile.public_key:
             return redirect("/")
     except Exception:
@@ -167,10 +166,10 @@ def setup_keys(request):
 @login_required
 @never_cache
 def unlock_keys(request):
-    """Page de déverrouillage des clés RSA (logins suivants)."""
+    """RSA key unlock page (subsequent logins)."""
     try:
         profile = request.user.userprofile
-        # Si aucune clé configurée, rediriger vers setup
+        # If no key is configured, redirect to setup
         if not profile.public_key:
             return redirect("accounts:setup_keys")
     except Exception:
@@ -181,11 +180,11 @@ def unlock_keys(request):
 @login_required
 @require_POST
 def api_store_keys(request):
-    """API: stocke les clés RSA chiffrées dans UserProfile (génération initiale)."""
+    """API: stores the encrypted RSA keys in UserProfile (initial generation)."""
     try:
         data = json.loads(request.body)
     except (json.JSONDecodeError, ValueError):
-        return JsonResponse({"success": False, "error": "Requête invalide."}, status=400)
+        return JsonResponse({"success": False, "error": "Invalid request."}, status=400)
 
     public_key = data.get("public_key", "").strip()
     encrypted_private_key = data.get("encrypted_private_key", "").strip()
@@ -193,7 +192,7 @@ def api_store_keys(request):
     key_iv = data.get("key_iv", "").strip()
 
     if not all([public_key, encrypted_private_key, key_salt, key_iv]):
-        return JsonResponse({"success": False, "error": "Données manquantes."}, status=400)
+        return JsonResponse({"success": False, "error": "Missing data."}, status=400)
 
     try:
         profile, _ = UserProfile.objects.get_or_create(user=request.user)
@@ -202,22 +201,22 @@ def api_store_keys(request):
         profile.key_salt = key_salt
         profile.key_iv = key_iv
         profile.save(update_fields=["public_key", "encrypted_private_key", "key_salt", "key_iv"])
-        # Marquer les clés comme déverrouillées pour cette session
+        # Mark the keys as unlocked for this session
         request.session["keys_unlocked"] = True
         return JsonResponse({"success": True})
     except Exception:
-        return JsonResponse({"success": False, "error": "Erreur lors du stockage."}, status=500)
+        return JsonResponse({"success": False, "error": "Error while storing keys."}, status=500)
 
 
 @login_required
 def api_get_keys(request):
-    """API: retourne les données chiffrées pour le déverrouillage côté client."""
+    """API: returns the encrypted data needed for client-side unlocking."""
     if request.method != "GET":
-        return JsonResponse({"success": False, "error": "Méthode non autorisée."}, status=405)
+        return JsonResponse({"success": False, "error": "Method not allowed."}, status=405)
     try:
         profile = request.user.userprofile
         if not profile.encrypted_private_key:
-            return JsonResponse({"success": False, "error": "Aucune clé configurée."}, status=404)
+            return JsonResponse({"success": False, "error": "No key configured."}, status=404)
         return JsonResponse({
             "success": True,
             "encrypted_private_key": profile.encrypted_private_key,
@@ -225,12 +224,12 @@ def api_get_keys(request):
             "key_iv": profile.key_iv,
         })
     except Exception:
-        return JsonResponse({"success": False, "error": "Profil introuvable."}, status=404)
+        return JsonResponse({"success": False, "error": "Profile not found."}, status=404)
 
 
 @login_required
 @require_POST
 def api_mark_unlocked(request):
-    """API: marque les clés comme déverrouillées pour la session courante."""
+    """API: marks the keys as unlocked for the current session."""
     request.session["keys_unlocked"] = True
     return JsonResponse({"success": True})

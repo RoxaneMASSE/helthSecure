@@ -2,8 +2,8 @@ import requests
 from django.conf import settings
 
 def get_admin_token():
-    """Récupère le token admin pour gérer Keycloak.
-    Utilise KEYCLOAK_INTERNAL_URL pour bypasser Nginx (port 8180 direct)."""
+    """Retrieves the admin token to manage Keycloak.
+    Uses KEYCLOAK_INTERNAL_URL to bypass Nginx (direct port 8180)."""
     url = f"{settings.KEYCLOAK_INTERNAL_URL}/realms/master/protocol/openid-connect/token"
     resp = requests.post(url, data={
         "grant_type": "password",
@@ -15,8 +15,8 @@ def get_admin_token():
     return resp.json()["access_token"]
 
 def create_keycloak_user(first_name, last_name, email, role):
-    """Crée un utilisateur SANS mot de passe (WebAuthn ready).
-    Utilise KEYCLOAK_INTERNAL_URL pour bypasser Nginx (port 8180 direct)."""
+    """Creates a user WITHOUT a password (WebAuthn ready).
+    Uses KEYCLOAK_INTERNAL_URL to bypass Nginx (direct port 8180)."""
     token = get_admin_token()
     realm = settings.KEYCLOAK_REALM
     base = f"{settings.KEYCLOAK_INTERNAL_URL}/admin/realms/{realm}"
@@ -25,7 +25,7 @@ def create_keycloak_user(first_name, last_name, email, role):
         "Content-Type": "application/json",
     }
 
-    # 1. Création de l'utilisateur (SANS credentials)
+    # 1. Create the user (WITHOUT credentials)
     payload = {
         "username": email,
         "email": email,
@@ -40,15 +40,15 @@ def create_keycloak_user(first_name, last_name, email, role):
     resp = requests.post(f"{base}/users", json=payload, headers=headers, timeout=10)
 
     if resp.status_code == 409:
-        raise ValueError("Un compte avec cet email existe déjà.")
+        raise ValueError("An account with this email already exists.")
     
     resp.raise_for_status()
 
-    # 2. Récupération de l'ID utilisateur
+    # 2. Retrieve the user ID
     location = resp.headers.get("Location", "")
     user_id = location.rstrip("/").split("/")[-1]
 
-    # 3. Attribution du rôle
+    # 3. Assign the role
     role_resp = requests.get(f"{base}/roles/{role}", headers=headers, timeout=10)
     role_resp.raise_for_status()
     role_data = role_resp.json()

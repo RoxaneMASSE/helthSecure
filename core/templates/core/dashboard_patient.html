@@ -2,7 +2,7 @@
 {% block title %}Patient Dashboard {% endblock %}
 {% block content %}
 <div class="card">
-    <h2>Bonjour {{ user.get_full_name|default:user.username }}
+    <h2>Hello {{ user.get_full_name|default:user.username }}
         <span class="badge-patient">Patient</span>
     </h2>
 </div>
@@ -17,7 +17,7 @@
         <p style="color:#888;margin:.5rem 0 1rem;">
             Manage assigned doctors
             {% if pending_requests_count > 0 %}
-                ({{ pending_requests_count }} demande{{ pending_requests_count|pluralize }} en attente)
+                ({{ pending_requests_count }} request{{ pending_requests_count|pluralize }} pending)
             {% endif %}
         </p>
         <a href="{% url 'core:my_doctors' %}" class="btn btn-primary">Manage</a>

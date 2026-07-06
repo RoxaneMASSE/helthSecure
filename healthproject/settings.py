@@ -1,5 +1,6 @@
 from pathlib import Path
 from decouple import config
+from csp.constants import NONCE
 import datetime
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -122,10 +123,12 @@ CONTENT_SECURITY_POLICY = {
     "DIRECTIVES": {
         "default-src": ["'self'"],
         # Les templates utilisent du JS inline → autoriser avec nonce
-        "script-src": ["'self'", "'unsafe-inline'", "https://www.google.com", "https://www.gstatic.com"],
+        # 'unsafe-inline' reste en fallback pour navigateurs anciens (CSP2) ;
+        # les navigateurs supportant les nonces (CSP3) l'ignorent automatiquement des lors qu'un nonce est present.
+        "script-src": ["'self'", NONCE, "'unsafe-inline'", "https://www.google.com", "https://www.gstatic.com"],
         # Styles inline Django courants
         "style-src": ["'self'", "'unsafe-inline'"],
-        "connect-src": ["'self'"],
+        "connect-src": ["'self'", "https://www.google.com"],
         "img-src": ["'self'", "data:"],
         "font-src": ["'self'"],
         "frame-src": ["'self'", "https://www.google.com"],

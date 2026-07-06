@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% load static %}
-{% block title %}Mes medecins{% endblock %}
+{% block title %}My doctors{% endblock %}
 
 {% block extra_head %}
 <script src="{% static 'accounts/js/keystore.js' %}"></script>
@@ -8,19 +8,19 @@
 
 {% block content %}
 <div class="card">
-    <a href="{% url 'core:dashboard_patient' %}" style="color:#457b9d;font-size:.9rem;">← Retour au tableau de bord</a>
-    <h2 style="margin-top:.8rem;">Mes medecins <span class="badge-patient">Patient</span></h2>
+    <a href="{% url 'core:dashboard_patient' %}" style="color:#457b9d;font-size:.9rem;">← Back to dashboard</a>
+    <h2 style="margin-top:.8rem;">My doctors <span class="badge-patient">Patient</span></h2>
 </div>
 
 <div class="card">
-    <h3>Ajouter un medecin</h3>
-    <p style="color:#888;margin:.5rem 0 1rem;">Rechercher par nom ou prenom</p>
-    <input id="doctor-search" type="text" placeholder="Ex: Dupont" style="width:100%;padding:.6rem;border:1px solid #ddd;border-radius:8px;">
+    <h3>Add a doctor</h3>
+    <p style="color:#888;margin:.5rem 0 1rem;">Search by first or last name</p>
+    <input id="doctor-search" type="text" placeholder="E.g.: Smith" style="width:100%;padding:.6rem;border:1px solid #ddd;border-radius:8px;">
     <div id="doctor-results" style="margin-top:1rem;"></div>
 </div>
 
 <div class="card">
-    <h3>Demandes en attente</h3>
+    <h3>Pending requests</h3>
     {% if pending_requests %}
         <ul style="list-style:none;padding:0;">
             {% for req in pending_requests %}
@@ -33,29 +33,29 @@
                         {% endif %}
                     </div>
                     <div style="display:flex;gap:.5rem;">
-                        {# Bouton Approuver : declenche le re-chiffrement via JS avant le POST #}
+                        {# Approve button: triggers re-encryption via JS before the POST #}
                         <form method="post"
                               action="{% url 'core:handle_request' req.id 'approve' %}"
                               class="reencrypt-approve-form"
                               data-doctor-id="{{ req.doctor.id }}">
                             {% csrf_token %}
-                            <button class="btn btn-primary" type="submit">Approuver</button>
+                            <button class="btn btn-primary" type="submit">Approve</button>
                         </form>
                         <form method="post" action="{% url 'core:handle_request' req.id 'reject' %}">
                             {% csrf_token %}
-                            <button class="btn btn-danger" type="submit">Rejeter</button>
+                            <button class="btn btn-danger" type="submit">Reject</button>
                         </form>
                     </div>
                 </li>
             {% endfor %}
         </ul>
     {% else %}
-        <p style="color:#888;">Aucune demande en attente.</p>
+        <p style="color:#888;">No pending requests.</p>
     {% endif %}
 </div>
 
 <div class="card">
-    <h3>Mes medecins associes</h3>
+    <h3>My associated doctors</h3>
     {% if doctors %}
         <ul style="list-style:none;padding:0;">
             {% for doctor in doctors %}
@@ -69,20 +69,20 @@
                     </div>
                     <form method="post" action="{% url 'core:remove_doctor' doctor.id %}">
                         {% csrf_token %}
-                        <button class="btn btn-danger" type="submit">Retirer</button>
+                        <button class="btn btn-danger" type="submit">Remove</button>
                     </form>
                 </li>
             {% endfor %}
         </ul>
     {% else %}
-        <p style="color:#888;">Aucun medecin associe.</p>
+        <p style="color:#888;">No associated doctors.</p>
     {% endif %}
 </div>
 
-<script>
-    // ── Utilitaires ──────────────────────────────────────────────────────────
+<script nonce="{{ CSP_NONCE }}">
+    // ── Utilities ──────────────────────────────────────────────────────────
 
-    /** Recupere le CSRF token depuis le cookie Django. */
+    /** Retrieves the CSRF token from the Django cookie. */
     function getCsrfToken() {
         const name = 'csrftoken';
         for (const cookie of document.cookie.split(';')) {
@@ -92,7 +92,7 @@
         return '';
     }
 
-    /** Convertit une chaine base64 en ArrayBuffer. */
+    /** Converts a base64 string to an ArrayBuffer. */
     function base64ToArrayBuffer(b64) {
         const binary = atob(b64);
         const bytes = new Uint8Array(binary.length);
@@ -102,7 +102,7 @@
         return bytes.buffer;
     }
 
-    /** Convertit un ArrayBuffer en chaine base64. */
+    /** Converts an ArrayBuffer to a base64 string. */
     function arrayBufferToBase64(buffer) {
         const bytes = new Uint8Array(buffer);
         let binary = '';
@@ -112,49 +112,49 @@
         return btoa(binary);
     }
 
-    // ── Re-chiffrement des cles AES ──────────────────────────────────────────
+    // ── Re-encryption of AES keys ─────────────────────────────────────────
 
     /**
-     * Re-chiffre toutes les cles AES des fichiers du patient avec la cle publique
-     * du nouveau medecin, puis appelle submitCallback() pour effectuer l'ajout.
+     * Re-encrypts all of the patient's file AES keys with the new doctor's
+     * public key, then calls submitCallback() to perform the addition.
      *
-     * @param {number} doctorId  - ID de l'utilisateur medecin a ajouter
-     * @param {Function} submitCallback - Fonction appelee apres le re-chiffrement reussi
+     * @param {number} doctorId  - ID of the doctor user to add
+     * @param {Function} submitCallback - Function called after successful re-encryption
      */
     async function reEncryptAndAddDoctor(doctorId, submitCallback) {
-        // Recuperer la cle privee depuis IndexedDB (non-extractable)
+        // Retrieve the private key from IndexedDB (non-extractable)
         const patientPrivateKey = await KeyStore.getPrivateKey();
         if (!patientPrivateKey) {
-            alert('Cle privee introuvable dans la session. Veuillez vous deconnecter et reconnecter.');
+            alert('Private key not found in session. Please log out and log back in.');
             return;
         }
 
         try {
-            // Etape 1 : recuperer la cle publique RSA du nouveau medecin
+            // Step 1: retrieve the new doctor's RSA public key
             const pubKeyResp = await fetch(`{% url 'core:api_user_public_key' 0 %}`.replace('/0/', `/${doctorId}/`));
             if (!pubKeyResp.ok) {
-                alert('Impossible de recuperer la cle publique du medecin.');
+                alert("Unable to retrieve the doctor's public key.");
                 return;
             }
             const pubKeyData = await pubKeyResp.json();
             const doctorPublicKeyB64 = pubKeyData.public_key;
 
-            // Etape 2 : recuperer tous les FileKeyShare du patient connecte
+            // Step 2: retrieve all FileKeyShare entries for the logged-in patient
             const fileKeysResp = await fetch(`{% url 'core:api_my_file_keys' %}`);
             if (!fileKeysResp.ok) {
-                alert('Impossible de recuperer la liste de vos fichiers.');
+                alert('Unable to retrieve your file list.');
                 return;
             }
             const fileKeysData = await fileKeysResp.json();
             const keyShares = fileKeysData.key_shares;
 
-            // Si le patient n'a aucun fichier, on passe directement a l'ajout
+            // If the patient has no files, proceed directly to the addition
             if (!keyShares || keyShares.length === 0) {
                 submitCallback();
                 return;
             }
 
-            // Etape 3 : importer la cle publique du medecin (SPKI, RSA-OAEP, SHA-256)
+            // Step 3: import the doctor's public key (SPKI, RSA-OAEP, SHA-256)
             const doctorPublicKeyBuffer = base64ToArrayBuffer(doctorPublicKeyB64);
             const doctorPublicKey = await crypto.subtle.importKey(
                 'spki',
@@ -164,10 +164,10 @@
                 ['encrypt']
             );
 
-            // Etape 4 : pour chaque fichier, dechiffrer la cle AES puis re-chiffrer
+            // Step 4: for each file, decrypt the AES key then re-encrypt it
             const newShares = [];
             for (const ks of keyShares) {
-                // Dechiffrer la cle AES avec la cle privee du patient
+                // Decrypt the AES key with the patient's private key
                 const encAesKeyBuffer = base64ToArrayBuffer(ks.encrypted_aes_key);
                 const aesKeyBuffer = await crypto.subtle.decrypt(
                     { name: 'RSA-OAEP' },
@@ -175,7 +175,7 @@
                     encAesKeyBuffer
                 );
 
-                // Re-chiffrer la cle AES brute avec la cle publique du medecin
+                // Re-encrypt the raw AES key with the doctor's public key
                 const newEncAesKeyBuffer = await crypto.subtle.encrypt(
                     { name: 'RSA-OAEP' },
                     doctorPublicKey,
@@ -189,7 +189,7 @@
                 });
             }
 
-            // Etape 5 : envoyer les nouveaux FileKeyShare au serveur
+            // Step 5: send the new FileKeyShare entries to the server
             const addSharesResp = await fetch(`{% url 'core:api_add_file_key_shares' %}`, {
                 method: 'POST',
                 headers: {
@@ -200,37 +200,37 @@
             });
 
             if (!addSharesResp.ok) {
-                let errMsg = 'Erreur inconnue';
+                let errMsg = 'Unknown error';
                 try {
                     const errData = await addSharesResp.json();
                     errMsg = errData.error || errMsg;
                 } catch (_) {}
-                alert(`Erreur lors du partage des cles : ${errMsg}`);
+                alert(`Error while sharing keys: ${errMsg}`);
                 return;
             }
 
-            // Etape 6 : tout est OK, effectuer l'ajout du medecin
+            // Step 6: everything is OK, perform the doctor addition
             submitCallback();
 
         } catch (err) {
-            alert(`Erreur lors du re-chiffrement : ${err.message}`);
+            alert(`Error during re-encryption: ${err.message}`);
         }
     }
 
-    // ── Recherche de medecins ────────────────────────────────────────────────
+    // ── Doctor search ────────────────────────────────────────────────────────
 
     const searchInput = document.getElementById('doctor-search');
     const resultsContainer = document.getElementById('doctor-results');
     const ADD_DOCTOR_URL = '{% url "core:add_doctor" %}';
 
     /**
-     * Affiche les resultats de la recherche de medecins.
-     * Le bouton Ajouter utilise data-doctor-id et la classe reencrypt-add-btn
-     * pour que le re-chiffrement soit fait avant l'envoi du formulaire POST.
+     * Renders the doctor search results.
+     * The Add button uses data-doctor-id and the reencrypt-add-btn class
+     * so that re-encryption is done before the POST form is submitted.
      */
     function renderDoctorResults(results) {
         if (!results.length) {
-            resultsContainer.innerHTML = '<p style="color:#888;">Aucun medecin trouve.</p>';
+            resultsContainer.innerHTML = '<p style="color:#888;">No doctor found.</p>';
             return;
         }
         resultsContainer.innerHTML = results.map((doctor) => `
@@ -239,24 +239,24 @@
                 <button type="button"
                         class="btn btn-primary reencrypt-add-btn"
                         data-doctor-id="${doctor.id}">
-                    Ajouter
+                    Add
                 </button>
             </div>
         `).join('');
     }
 
-    // Delegation d'evenement pour les boutons Ajouter generes dynamiquement
+    // Event delegation for the dynamically generated Add buttons
     document.addEventListener('click', async (e) => {
         const btn = e.target.closest('.reencrypt-add-btn');
         if (!btn) return;
 
         btn.disabled = true;
-        btn.textContent = 'En cours...';
+        btn.textContent = 'Processing...';
 
         const doctorId = parseInt(btn.dataset.doctorId, 10);
 
         await reEncryptAndAddDoctor(doctorId, () => {
-            // Construire et soumettre le formulaire POST add_doctor
+            // Build and submit the add_doctor POST form
             const form = document.createElement('form');
             form.method = 'POST';
             form.action = ADD_DOCTOR_URL;
@@ -277,12 +277,12 @@
             form.submit();
         });
 
-        // Restaurer le bouton si une erreur s'est produite (sinon la page change)
+        // Restore the button if an error occurred (otherwise the page changes)
         btn.disabled = false;
-        btn.textContent = 'Ajouter';
+        btn.textContent = 'Add';
     });
 
-    // Interception des formulaires Approuver : re-chiffrement avant le POST
+    // Intercept Approve form submissions: re-encryption before the POST
     document.querySelectorAll('.reencrypt-approve-form').forEach((form) => {
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -291,24 +291,24 @@
             const btn = form.querySelector('button[type="submit"]');
             if (btn) {
                 btn.disabled = true;
-                btn.textContent = 'En cours...';
+                btn.textContent = 'Processing...';
             }
 
             await reEncryptAndAddDoctor(doctorId, () => {
-                // Soumettre le formulaire apres le re-chiffrement reussi
-                // form.submit() contourne l'eventListener, evitant une boucle infinie
+                // Submit the form after successful re-encryption
+                // form.submit() bypasses the eventListener, avoiding an infinite loop
                 form.submit();
             });
 
-            // Restaurer le bouton si une erreur s'est produite
+            // Restore the button if an error occurred
             if (btn) {
                 btn.disabled = false;
-                btn.textContent = 'Approuver';
+                btn.textContent = 'Approve';
             }
         });
     });
 
-    // ── Debounce de la recherche ─────────────────────────────────────────────
+    // ── Search debounce ────────────────────────────────────────────────────
 
     let debounceTimer;
     searchInput.addEventListener('input', () => {
@@ -324,7 +324,7 @@
                 const data = await response.json();
                 renderDoctorResults(data.results || []);
             } catch (error) {
-                resultsContainer.innerHTML = '<p style="color:#a00;">Erreur de recherche.</p>';
+                resultsContainer.innerHTML = '<p style="color:#a00;">Search error.</p>';
             }
         }, 250);
     });

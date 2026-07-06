@@ -13,9 +13,10 @@ urlpatterns = [
     path("doctors/request/<int:request_id>/<str:action>/", views.handle_request, name="handle_request"),
     path("doctors/search/", views.search_doctors, name="search_doctors"),
     path("patients/", views.my_patients, name="my_patients"),
+    path("patients/records/", views.medical_records, name="medical_records"),
     path("patients/request/", views.request_patient, name="request_patient"),
     path("patients/search/", views.search_patients, name="search_patients"),
-    # Fichiers medicaux E2E
+    # E2E medical files
     path("files/", views.medical_files, name="medical_files"),
     path("files/upload/", views.upload_file, name="upload_file"),
     path("files/download/<int:file_id>/", views.download_file, name="download_file"),
@@ -25,13 +26,13 @@ urlpatterns = [
     path("files/patient/<int:patient_id>/", views.doctor_patient_files, name="doctor_patient_files"),
     path("files/patient/<int:patient_id>/upload/", views.doctor_upload_file, name="doctor_upload_file"),
     path("files/patient/<int:patient_id>/keys/", views.api_doctor_patient_keys, name="api_doctor_patient_keys"),
-    # API re-chiffrement lors de l'ajout d'un medecin
+    # API re-encryption when adding a doctor
     path("api/user-public-key/<int:user_id>/", views.api_user_public_key, name="api_user_public_key"),
     path("api/my-file-keys/", views.api_my_file_keys, name="api_my_file_keys"),
     path("api/add-file-key-shares/", views.api_add_file_key_shares, name="api_add_file_key_shares"),
-    # Ecrasement de fichier (patient)
+    # File overwrite (patient)
     path("files/overwrite/<int:file_id>/", views.api_overwrite_file, name="api_overwrite_file"),
-    # Suppression initiee par un medecin avec approbation patient
+    # Deletion initiated by a doctor with patient approval
     path("files/request-deletion/<int:file_id>/", views.request_file_deletion, name="request_file_deletion"),
     path("files/deletion-request/<int:request_id>/<str:action>/", views.handle_deletion_request, name="handle_deletion_request"),
     path("files/request-modification/<int:file_id>/", views.request_file_modification, name="request_file_modification"),

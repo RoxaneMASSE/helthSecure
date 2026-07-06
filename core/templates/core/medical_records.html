@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Medical records{% endblock %}
+
+{% block content %}
+<div class="card">
+    <a href="{% url 'core:dashboard_doctor' %}" style="color:#457b9d;font-size:.9rem;">← Back to dashboard</a>
+    <h2 style="margin-top:.8rem;">Medical records <span class="badge-doctor">Doctor</span></h2>
+</div>
+
+<div class="card">
+    <h3>My patients</h3>
+    {% if patients %}
+        <ul style="list-style:none;padding:0;">
+            {% for patient in patients %}
+                <li style="padding:.8rem 0;border-bottom:1px solid #f0f0f0;display:flex;justify-content:space-between;align-items:center;gap:1rem;">
+                    <span>{{ patient.user.email|default:patient.user.username }}</span>
+                    <a href="{% url 'core:doctor_patient_files' patient.user.id %}" class="btn btn-primary" style="font-size:.85rem;padding:.4rem .9rem;">
+                        View files
+                    </a>
+                </li>
+            {% endfor %}
+        </ul>
+    {% else %}
+        <p style="color:#888;">No associated patients.</p>
+    {% endif %}
+</div>
+{% endblock %}

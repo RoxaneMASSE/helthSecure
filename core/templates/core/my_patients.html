@@ -1,39 +1,39 @@
 {% extends "base.html" %}
-{% block title %}Mes patients{% endblock %}
+{% block title %}My patients{% endblock %}
 
 {% block content %}
 <div class="card">
-    <a href="{% url 'core:dashboard_doctor' %}" style="color:#457b9d;font-size:.9rem;">← Retour au tableau de bord</a>
-    <h2 style="margin-top:.8rem;">Mes patients <span class="badge-doctor">Doctor</span></h2>
+    <a href="{% url 'core:dashboard_doctor' %}" style="color:#457b9d;font-size:.9rem;">← Back to dashboard</a>
+    <h2 style="margin-top:.8rem;">My patients <span class="badge-doctor">Doctor</span></h2>
 </div>
 
 <div class="card">
-    <h3>Demander a suivre un patient</h3>
-    <p style="color:#888;margin:.5rem 0 1rem;">Rechercher par nom d'utilisateur</p>
-    <input id="patient-search" type="text" placeholder="Ex: patient01" style="width:100%;padding:.6rem;border:1px solid #ddd;border-radius:8px;">
+    <h3>Request to follow a patient</h3>
+    <p style="color:#888;margin:.5rem 0 1rem;">Search by username</p>
+    <input id="patient-search" type="text" placeholder="E.g.: patient01" style="width:100%;padding:.6rem;border:1px solid #ddd;border-radius:8px;">
     <div id="patient-results" style="margin-top:1rem;"></div>
 </div>
 
 <div class="card">
-    <h3>Mes patients suivis</h3>
+    <h3>My followed patients</h3>
     {% if patients %}
         <ul style="list-style:none;padding:0;">
             {% for patient in patients %}
                 <li style="padding:.8rem 0;border-bottom:1px solid #f0f0f0;display:flex;justify-content:space-between;align-items:center;gap:1rem;">
                     <span>{{ patient.user.email|default:patient.user.username }}</span>
                     <a href="{% url 'core:doctor_patient_files' patient.user.id %}" class="btn btn-primary" style="font-size:.85rem;padding:.4rem .9rem;">
-                        Voir fichiers
+                        View files
                     </a>
                 </li>
             {% endfor %}
         </ul>
     {% else %}
-        <p style="color:#888;">Aucun patient associe.</p>
+        <p style="color:#888;">No associated patients.</p>
     {% endif %}
 </div>
 
 <div class="card">
-    <h3>Demandes envoyees</h3>
+    <h3>Sent requests</h3>
     {% if sent_requests %}
         <ul style="list-style:none;padding:0;">
             {% for req in sent_requests %}
@@ -41,28 +41,28 @@
                     <span>{{ req.patient.email|default:req.patient.username }}</span>
                     <span>
                         {% if req.status == 'pending' %}
-                            En attente
+                            Pending
                         {% elif req.status == 'approved' %}
-                            Approuvee
+                            Approved
                         {% else %}
-                            Rejetee
+                            Rejected
                         {% endif %}
                     </span>
                 </li>
             {% endfor %}
         </ul>
     {% else %}
-        <p style="color:#888;">Aucune demande envoyee.</p>
+        <p style="color:#888;">No requests sent.</p>
     {% endif %}
 </div>
 
-<script>
+<script nonce="{{ CSP_NONCE }}">
     const patientSearchInput = document.getElementById('patient-search');
     const patientResultsContainer = document.getElementById('patient-results');
 
     function renderPatientResults(results) {
         if (!results.length) {
-            patientResultsContainer.innerHTML = '<p style="color:#888;">Aucun patient trouve.</p>';
+            patientResultsContainer.innerHTML = '<p style="color:#888;">No patient found.</p>';
             return;
         }
         patientResultsContainer.innerHTML = results.map((patient) => `
@@ -71,7 +71,7 @@
                 <form method="post" action="{% url 'core:request_patient' %}">
                     {% csrf_token %}
                     <input type="hidden" name="patient_id" value="${patient.id}">
-                    <button type="submit" class="btn btn-primary">Demander</button>
+                    <button type="submit" class="btn btn-primary">Request</button>
                 </form>
             </div>
         `).join('');
@@ -91,7 +91,7 @@
                 const data = await response.json();
                 renderPatientResults(data.results || []);
             } catch (error) {
-                patientResultsContainer.innerHTML = '<p style="color:#a00;">Erreur de recherche.</p>';
+                patientResultsContainer.innerHTML = '<p style="color:#a00;">Search error.</p>';
             }
         }, 250);
     });
