@@ -1,0 +1,57 @@
+version: '3.8'
+
+# ELK Stack (Elasticsearch, Logstash, Kibana) pour la centralisation des logs
+# de sécurité de l'application (connexions, échecs d'authentification, accès
+# aux fichiers médicaux). Django envoie les logs directement à Logstash en TCP
+# (voir healthproject/settings.py, handler "logstash"), qui les transmet à
+# Elasticsearch. Kibana sert à les visualiser.
+#
+# Lancement : docker compose -f docker-compose.elk.yml up -d
+
+services:
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.0
+    container_name: healthsecure_elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    networks:
+      - elk_net
+
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.13.0
+    container_name: healthsecure_logstash
+    depends_on:
+      - elasticsearch
+    volumes:
+      - ./elk/logstash.conf:/usr/share/logstash/pipeline/logstash.conf:ro
+    ports:
+      - "5000:5000"   # Django -> Logstash (TCP, logs JSON)
+    environment:
+      - "LS_JAVA_OPTS=-Xms256m -Xmx256m"
+    networks:
+      - elk_net
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.13.0
+    container_name: healthsecure_kibana
+    depends_on:
+      - elasticsearch
+    ports:
+      - "5601:5601"
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    networks:
+      - elk_net
+
+networks:
+  elk_net:
+    driver: bridge
+
+volumes:
+  es_data:

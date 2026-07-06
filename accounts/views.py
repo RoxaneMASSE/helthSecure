@@ -15,31 +15,12 @@ from urllib.parse import urlencode
 from django.views.decorators.cache import never_cache
 from django_ratelimit.decorators import ratelimit
 
-from webauthn.helpers.structs import PublicKeyCredentialDescriptor
-
-
-import webauthn
-from webauthn.helpers.structs import (
-    AuthenticatorSelectionCriteria,
-    UserVerificationRequirement,
-    ResidentKeyRequirement,
-)
-from webauthn.helpers.cose import COSEAlgorithmIdentifier
-
 from .forms import PatientRegistrationForm, DoctorRegistrationForm
 from .keycloak_client import create_keycloak_user
 from .certificate import certificate_service
 from .models import UserProfile
 
 
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-def _get_rp_id():
-    return settings.WEBAUTHN_RP_ID
-
-def _get_origin():
-    return settings.WEBAUTHN_ORIGIN.rstrip('/')
 
 # ── Registration (Keycloak) ───────────────────────────────────────────────────
 

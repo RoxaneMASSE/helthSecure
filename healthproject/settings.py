@@ -115,6 +115,80 @@ RECAPTCHA_PUBLIC_KEY  = config('RECAPTCHA_PUBLIC_KEY')
 RECAPTCHA_PRIVATE_KEY = config('RECAPTCHA_PRIVATE_KEY')
 SILENCED_SYSTEM_CHECKS = ['django_recaptcha.recaptcha_test_key_error']
 
+# ── Logging (connexions, échecs d'authentification, accès fichiers médicaux) ─
+LOGS_DIR = BASE_DIR / "logs"
+LOGS_DIR.mkdir(exist_ok=True)
+
+# ELK : désactivé par défaut pour ne pas casser le dev si Logstash ne tourne
+# pas (docker-compose.elk.yml). Activer via .env : LOGSTASH_ENABLED=True
+LOGSTASH_ENABLED = config('LOGSTASH_ENABLED', default=False, cast=bool)
+LOGSTASH_HOST = config('LOGSTASH_HOST', default='localhost')
+LOGSTASH_PORT = config('LOGSTASH_PORT', default=5000, cast=int)
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        # One JSON object per line -> easy to ship to ELK (Filebeat/Logstash)
+        # without any extra parsing config on the ingestion side.
+        "json": {
+            "format": (
+                '{"time": "%(asctime)s", "level": "%(levelname)s", '
+                '"logger": "%(name)s", "message": "%(message)s"}'
+            ),
+            "datefmt": "%Y-%m-%dT%H:%M:%S%z",
+        },
+        "console": {
+            "format": "[%(asctime)s] %(levelname)s %(name)s: %(message)s",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "console",
+        },
+        "security_file": {
+            "class": "logging.handlers.RotatingFileHandler",
+            "filename": LOGS_DIR / "security.log",
+            "maxBytes": 5 * 1024 * 1024,
+            "backupCount": 5,
+            "formatter": "json",
+        },
+        "django_file": {
+            "class": "logging.handlers.RotatingFileHandler",
+            "filename": LOGS_DIR / "django.log",
+            "maxBytes": 5 * 1024 * 1024,
+            "backupCount": 5,
+            "formatter": "json",
+        },
+    },
+    "loggers": {
+        # Authentication, authorization and medical-file access events.
+        "security": {
+            "handlers": ["console", "security_file"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        # Django's own auth/request/security warnings (login_failed, 400/403/500, etc.)
+        "django": {
+            "handlers": ["console", "django_file"],
+            "level": "INFO",
+            "propagate": False,
+        },
+    },
+}
+
+if LOGSTASH_ENABLED:
+    LOGGING["handlers"]["logstash"] = {
+        "class": "logstash.TCPLogstashHandler",
+        "host": LOGSTASH_HOST,
+        "port": LOGSTASH_PORT,
+        "version": 1,
+        "message_type": "django",
+    }
+    LOGGING["loggers"]["security"]["handlers"].append("logstash")
+    LOGGING["loggers"]["django"]["handlers"].append("logstash")
+
 # ── Content-Security-Policy (django-csp 4.x) ─────────────────────────────────
 # Les templates Django contiennent du JS inline ; les nonces sont disponibles
 # via {{ CSP_NONCE }} dans les templates (context_processor csp.context_processors.nonce).

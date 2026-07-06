@@ -1,5 +1,6 @@
 import base64
 import json
+import logging
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -12,6 +13,9 @@ from django_ratelimit.decorators import ratelimit
 
 from accounts.decorators import role_required
 from .models import DoctorAppointmentRequest, DoctorProfile, FileDeletionRequest, FileKeyShare, MedicalFile, FileModificationRequest
+
+logger = logging.getLogger("security")
+
 
 def home(request):
     if request.user.is_authenticated:
@@ -386,8 +390,13 @@ def upload_file(request):
                 user=user,
                 encrypted_aes_key=ks_data["encrypted_aes_key"],
             )
+        logger.info(
+            "FILE_UPLOAD user=%s file_id=%s",
+            request.user.email, medical_file.id,
+        )
         return JsonResponse({"success": True, "file_id": medical_file.id})
     except Exception as e:
+        logger.warning("FILE_UPLOAD_FAILED user=%s error=%s", request.user.email, e)
         return JsonResponse({"error": str(e)}, status=400)
 
 
@@ -411,9 +420,17 @@ def download_file(request, file_id):
         pass
 
     if not (is_patient or is_doctor):
+        logger.warning(
+            "FILE_ACCESS_DENIED user=%s file_id=%s",
+            request.user.email, file_id,
+        )
         return JsonResponse({"error": "Access denied."}, status=403)
 
     ks = get_object_or_404(FileKeyShare, file=medical_file, user=request.user)
+    logger.info(
+        "FILE_DOWNLOAD user=%s file_id=%s",
+        request.user.email, file_id,
+    )
     # Encode the binary content in base64 for JSON transport
     encrypted_file_b64 = base64.b64encode(bytes(medical_file.encrypted_file)).decode()
     return JsonResponse({

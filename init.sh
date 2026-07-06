@@ -247,6 +247,27 @@ CLIENT_SECRET=$(curl -s \
 echo "✔ Secret client récupéré"
 echo "✔ Configuration Keycloak importée automatiquement depuis keycloak/import/realm-export.json"
 
+# ── Stack ELK (logs) - optionnel ───────────────────────
+# Optionnel car lourd (Elasticsearch/Logstash/Kibana, ~1.5 Go d'images) et pas
+# nécessaire au fonctionnement de l'appli : sans lui, les logs restent quand
+# même écrits dans logs/security.log et logs/django.log.
+read -p "Lancer aussi le stack ELK (logs, Elasticsearch/Logstash/Kibana) ? [y/N] : " ELK_CHOICE
+if [[ "$ELK_CHOICE" =~ ^[Yy]$ ]]; then
+    echo "Lancement du stack ELK..."
+    docker compose -f docker-compose.elk.yml up -d
+    echo "Attente Elasticsearch..."
+    until curl -s "http://localhost:9200/_cluster/health" >/dev/null 2>&1; do
+        sleep 3
+        echo -n "."
+    done
+    echo ""
+    echo "✔ Stack ELK prêt (Kibana : http://localhost:5601)"
+    LOGSTASH_ENABLED="True"
+else
+    echo "✓ Stack ELK ignoré (logs disponibles dans logs/security.log et logs/django.log)"
+    LOGSTASH_ENABLED="False"
+fi
+
 # ── [7/7] Génération .env ─────────────────────────────
 echo "[7/7] Génération .env..."
 
@@ -274,6 +295,10 @@ KEYCLOAK_ADMIN_PASSWORD=${ADMIN_PASS}
 
 OIDC_RP_CLIENT_ID=${CLIENT_ID}
 OIDC_RP_CLIENT_SECRET=${CLIENT_SECRET}
+
+LOGSTASH_ENABLED=${LOGSTASH_ENABLED}
+LOGSTASH_HOST=localhost
+LOGSTASH_PORT=5000
 EOF
 
 chmod 600 .env
@@ -290,6 +315,9 @@ echo "  ✓ Initialisation terminée !"
 echo "============================================"
 echo ""
 echo "Keycloak Admin : http://localhost:8080/admin  (admin/admin)"
+if [ "$LOGSTASH_ENABLED" = "True" ]; then
+    echo "Kibana (logs)  : http://localhost:5601"
+fi
 echo ""
 echo "Lancer Django :"
 echo "  python manage.py runserver"
