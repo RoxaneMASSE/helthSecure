@@ -459,11 +459,13 @@ def approve_file(request, file_id):
         # Mark the file as approved
         medical_file.approved = True
         medical_file.save(update_fields=["approved"])
+        logger.info("FILE_APPROVE user=%s file_id=%s", request.user.email, file_id)
         return JsonResponse({"success": True, "action": "approved"})
 
     elif action == "reject":
         # Delete the file and all its key shares
         medical_file.delete()
+        logger.info("FILE_REJECT user=%s file_id=%s", request.user.email, file_id)
         return JsonResponse({"success": True, "action": "rejected"})
 
     else:
@@ -477,6 +479,7 @@ def delete_file(request, file_id):
     """Deletes a medical file and all its key shares."""
     medical_file = get_object_or_404(MedicalFile, id=file_id, patient=request.user)
     medical_file.delete()
+    logger.info("FILE_DELETE user=%s file_id=%s", request.user.email, file_id)
     return JsonResponse({"success": True})
 
 
@@ -527,9 +530,17 @@ def doctor_patient_files(request, patient_id):
         is_associated = False
 
     if not is_associated:
+        logger.warning(
+            "PATIENT_FILES_ACCESS_DENIED user=%s patient_id=%s",
+            request.user.email, patient_id,
+        )
         messages.error(request, "You are not associated with this patient.")
         return redirect("core:my_patients")
 
+    logger.info(
+        "PATIENT_FILES_ACCESS user=%s patient_id=%s",
+        request.user.email, patient_id,
+    )
     files = (
         MedicalFile.objects
         .filter(patient=patient)
@@ -578,6 +589,10 @@ def doctor_upload_file(request, patient_id):
         is_associated = False
 
     if not is_associated:
+        logger.warning(
+            "FILE_UPLOAD_BY_DOCTOR_DENIED user=%s patient_id=%s",
+            request.user.email, patient_id,
+        )
         return JsonResponse({"error": "Access denied."}, status=403)
 
     try:
@@ -609,8 +624,16 @@ def doctor_upload_file(request, patient_id):
                 user=user,
                 encrypted_aes_key=ks_data["encrypted_aes_key"],
             )
+        logger.info(
+            "FILE_UPLOAD_BY_DOCTOR user=%s patient_id=%s file_id=%s",
+            request.user.email, patient_id, medical_file.id,
+        )
         return JsonResponse({"success": True, "file_id": medical_file.id})
     except Exception as e:
+        logger.warning(
+            "FILE_UPLOAD_BY_DOCTOR_FAILED user=%s patient_id=%s error=%s",
+            request.user.email, patient_id, e,
+        )
         return JsonResponse({"error": str(e)}, status=400)
 
 
@@ -705,8 +728,10 @@ def api_overwrite_file(request, file_id):
         medical_file.file_iv = file_iv
         medical_file.save(update_fields=["encrypted_file", "encrypted_filename", "encrypted_date", "file_iv"])
 
+        logger.info("FILE_OVERWRITE user=%s file_id=%s", request.user.email, file_id)
         return JsonResponse({"success": True})
     except Exception as e:
+        logger.warning("FILE_OVERWRITE_FAILED user=%s file_id=%s error=%s", request.user.email, file_id, e)
         return JsonResponse({"error": str(e)}, status=400)
 
 
@@ -724,6 +749,10 @@ def request_file_deletion(request, file_id):
         is_associated = False
 
     if not is_associated:
+        logger.warning(
+            "FILE_DELETION_REQUEST_DENIED user=%s file_id=%s",
+            request.user.email, file_id,
+        )
         return JsonResponse({"error": "Access denied."}, status=403)
 
     deletion_req, created = FileDeletionRequest.objects.get_or_create(
@@ -735,9 +764,11 @@ def request_file_deletion(request, file_id):
         if deletion_req.status == FileDeletionRequest.STATUS_REJECTED:
             deletion_req.status = FileDeletionRequest.STATUS_PENDING
             deletion_req.save(update_fields=["status", "updated_at"])
+            logger.info("FILE_DELETION_REQUESTED user=%s file_id=%s", request.user.email, file_id)
             return JsonResponse({"success": True, "message": "Request re-sent."})
         return JsonResponse({"success": False, "message": "A request is already in progress."})
 
+    logger.info("FILE_DELETION_REQUESTED user=%s file_id=%s", request.user.email, file_id)
     return JsonResponse({"success": True, "message": "Request sent to the patient."})
 
 
@@ -754,6 +785,10 @@ def request_file_modification(request, file_id):
         is_associated = False
 
     if not is_associated:
+        logger.warning(
+            "FILE_MODIFICATION_REQUEST_DENIED user=%s file_id=%s",
+            request.user.email, file_id,
+        )
         return JsonResponse({"error": "Access denied."}, status=403)
 
     try:
@@ -779,6 +814,7 @@ def request_file_modification(request, file_id):
         mod_req.new_encrypted_date = new_encrypted_date
         mod_req.status = FileModificationRequest.STATUS_PENDING
         mod_req.save()
+        logger.info("FILE_MODIFICATION_REQUESTED user=%s file_id=%s", request.user.email, file_id)
         return JsonResponse({"success": True, "message": "Request updated and re-sent to the patient."})
     except FileModificationRequest.DoesNotExist:
         pass
@@ -792,6 +828,7 @@ def request_file_modification(request, file_id):
         new_encrypted_filename=new_encrypted_filename,
         new_encrypted_date=new_encrypted_date,
     )
+    logger.info("FILE_MODIFICATION_REQUESTED user=%s file_id=%s", request.user.email, file_id)
     return JsonResponse({"success": True, "message": "Request sent to the patient."})
 
 
@@ -809,11 +846,17 @@ def handle_deletion_request(request, request_id, action):
 
     if action == "approve":
         medical_file = deletion_req.file
+        file_id = medical_file.id
         medical_file.delete()  # also deletes the related FileKeyShare rows and requests (CASCADE)
+        logger.info("FILE_DELETION_APPROVED user=%s file_id=%s", request.user.email, file_id)
         return JsonResponse({"success": True, "action": "approved"})
     elif action == "reject":
         deletion_req.status = FileDeletionRequest.STATUS_REJECTED
         deletion_req.save(update_fields=["status", "updated_at"])
+        logger.info(
+            "FILE_DELETION_REJECTED user=%s file_id=%s",
+            request.user.email, deletion_req.file_id,
+        )
         return JsonResponse({"success": True, "action": "rejected"})
     else:
         return JsonResponse({"error": "Invalid action."}, status=400)
@@ -840,10 +883,18 @@ def handle_modification_request(request, request_id, action):
         medical_file.save(update_fields=["encrypted_file", "file_iv", "encrypted_filename", "encrypted_date"])
         mod_req.status = FileModificationRequest.STATUS_APPROVED
         mod_req.save(update_fields=["status", "updated_at"])
+        logger.info(
+            "FILE_MODIFICATION_APPROVED user=%s file_id=%s",
+            request.user.email, medical_file.id,
+        )
         return JsonResponse({"success": True, "action": "approved"})
     elif action == "reject":
         mod_req.status = FileModificationRequest.STATUS_REJECTED
         mod_req.save(update_fields=["status", "updated_at"])
+        logger.info(
+            "FILE_MODIFICATION_REJECTED user=%s file_id=%s",
+            request.user.email, mod_req.file_id,
+        )
         return JsonResponse({"success": True, "action": "rejected"})
     else:
         return JsonResponse({"error": "Invalid action."}, status=400)

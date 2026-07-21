@@ -2,6 +2,7 @@ from pathlib import Path
 from decouple import config
 from csp.constants import NONCE
 import datetime
+import sys
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -14,6 +15,18 @@ ALLOWED_HOSTS = config(
     default='localhost,127.0.0.1',
     cast=lambda v: [s.strip() for s in v.split(',')]
 )
+
+# ── HTTPS enforcement ─────────────────────────────────────────────────────
+# Auto-enabled only when the server is launched over TLS
+# (python manage.py runserver_plus --cert-file cert.crt), so normal dev
+# (`manage.py runserver`, plain HTTP) keeps working without breaking
+# sessions/CSRF/redirects.
+FORCE_HTTPS = 'runserver_plus' in sys.argv and '--cert-file' in sys.argv
+
+SECURE_SSL_REDIRECT = FORCE_HTTPS
+SESSION_COOKIE_SECURE = FORCE_HTTPS
+CSRF_COOKIE_SECURE = FORCE_HTTPS
+SECURE_HSTS_SECONDS = 3600 if FORCE_HTTPS else 0
 
 INSTALLED_APPS = [
     "django.contrib.admin",

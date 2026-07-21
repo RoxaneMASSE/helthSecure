@@ -3,11 +3,8 @@ from django.db import models
 
 
 class PatientProfile(models.Model):
-    # Patient profile: identity data stays E2E encrypted client-side.
+    # Patient profile.
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="patient_profile")
-    first_name_encrypted = models.TextField(blank=True, null=True)
-    last_name_encrypted = models.TextField(blank=True, null=True)
-    date_of_birth_encrypted = models.TextField(blank=True, null=True)
     # Doctors authorized to access this patient's data.
     doctors = models.ManyToManyField(
         User,
