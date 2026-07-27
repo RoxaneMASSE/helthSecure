@@ -1,38 +1,38 @@
 #!/usr/bin/env bash
-# init.sh - Initialisation complète du projet HealthSecure
-# Génère tous les secrets Django + configure Keycloak automatiquement
+# init.sh - Full initialization of the HealthSecure project
+# Generates all Django secrets + configures Keycloak automatically
 
 set -e
 
 echo "============================================"
-echo "  HealthSecure - Initialisation complète"
+echo "  HealthSecure - Full initialization"
 echo "============================================"
 echo ""
 
-# ── Config Keycloak ────────────────────────────────────
-KC_URL="http://localhost:8080"          # URL publique (via Nginx) → KEYCLOAK_URL dans .env
-KC_URL_INTERNAL="http://localhost:8180" # URL interne directe (bypass Nginx) → appels admin
+# ── Keycloak config ────────────────────────────────────
+KC_URL="http://localhost:8080"          # Public URL (via Nginx) → KEYCLOAK_URL in .env
+KC_URL_INTERNAL="http://localhost:8180" # Direct internal URL (bypass Nginx) → admin calls
 REALM="health"
 CLIENT_ID="django-health"
 ADMIN="admin"
 ADMIN_PASS="admin"
 
-# ── Vérifier si .env existe ────────────────────────────
+# ── Check if .env already exists ───────────────────────
 if [ -f ".env" ]; then
-    read -p "Le fichier .env existe. Remplacer ? [y/N] : " REPLACE
+    read -p "The .env file already exists. Replace it? [y/N]: " REPLACE
     if [[ ! "$REPLACE" =~ ^[Yy]$ ]]; then
-        echo "✓ .env conservé"
+        echo "✓ .env kept"
         exit 0
     fi
 fi
 
-# ── Vérifier les outils ────────────────────────────────
-command -v docker >/dev/null || { echo "❌ Docker manquant"; exit 1; }
-command -v curl   >/dev/null || { echo "❌ curl manquant";   exit 1; }
-command -v openssl >/dev/null || echo "⚠️  OpenSSL non trouvé (certificats ignorés)"
-echo "✔ Outils vérifiés"
+# ── Check required tools ───────────────────────────────
+command -v docker >/dev/null || { echo "❌ Docker missing"; exit 1; }
+command -v curl   >/dev/null || { echo "❌ curl missing";   exit 1; }
+command -v openssl >/dev/null || echo "⚠️  OpenSSL not found (certificates skipped)"
+echo "✔ Tools checked"
 
-# ── Trouver Python système pour créer le venv ─────────
+# ── Find system Python to create the venv ─────────────
 SYS_PYTHON=""
 if command -v python &>/dev/null; then
     SYS_PYTHON="python"
@@ -45,72 +45,72 @@ elif [ -f "/c/python312/python.exe" ]; then
 fi
 
 if [ -z "$SYS_PYTHON" ]; then
-    echo "❌ Python non trouvé. Installez Python 3.x."
+    echo "❌ Python not found. Please install Python 3.x."
     exit 1
 fi
-echo "✔ Python système : $SYS_PYTHON"
+echo "✔ System Python: $SYS_PYTHON"
 
-# ── Créer le venv si absent ────────────────────────────
+# ── Create the venv if missing ─────────────────────────
 if [ ! -d ".venv" ]; then
-    echo "Création du venv..."
+    echo "Creating venv..."
     $SYS_PYTHON -m venv .venv
-    echo "✔ Venv créé"
+    echo "✔ Venv created"
 else
-    echo "✔ Venv existant"
+    echo "✔ Venv already exists"
 fi
 
-# ── Pointer vers le Python du venv ────────────────────
+# ── Point to the venv Python ──────────────────────────
 if [ -f ".venv/Scripts/python.exe" ]; then
     PYTHON_CMD=".venv/Scripts/python.exe"
 elif [ -f ".venv/bin/python" ]; then
     PYTHON_CMD=".venv/bin/python"
 else
-    echo "❌ Venv créé mais Python introuvable dedans"
+    echo "❌ Venv created but Python not found inside it"
     exit 1
 fi
-echo "✔ Python venv : $PYTHON_CMD"
+echo "✔ Venv Python: $PYTHON_CMD"
 
-# ── Installer les dépendances dans le venv ─────────────
-echo "Installation des dépendances..."
+# ── Install dependencies in the venv ───────────────────
+echo "Installing dependencies..."
 $PYTHON_CMD -m pip install --upgrade pip -q
 if [ -f "requirements.txt" ]; then
     $PYTHON_CMD -m pip install -r requirements.txt -q
-    echo "✔ Dépendances installées"
+    echo "✔ Dependencies installed"
 else
-    echo "⚠️  requirements.txt introuvable, installation minimale..."
+    echo "⚠️  requirements.txt not found, installing minimal packages..."
     $PYTHON_CMD -m pip install django cryptography -q
 fi
 echo ""
 
-# ── [1/7] SECRET_KEY Django ────────────────────────────
-echo "[1/7] Génération SECRET_KEY..."
+# ── [1/7] Django SECRET_KEY ─────────────────────────────
+echo "[1/7] Generating SECRET_KEY..."
 SECRET_KEY=$($PYTHON_CMD -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())" 2>&1)
 if echo "$SECRET_KEY" | grep -q "Error\|Traceback"; then
-    echo "❌ Erreur: $SECRET_KEY"
-    echo "   Installez Django : pip install django"
+    echo "❌ Error: $SECRET_KEY"
+    echo "   Install Django: pip install django"
     exit 1
 fi
-echo "✓ Généré"
+echo "✓ Generated"
 
 # ── [2/7] ENCRYPTION_KEY ──────────────────────────────
-echo "[2/7] Génération ENCRYPTION_KEY..."
+echo "[2/7] Generating ENCRYPTION_KEY..."
 ENCRYPTION_KEY=$($PYTHON_CMD -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" 2>&1)
 if echo "$ENCRYPTION_KEY" | grep -q "Error\|Traceback"; then
-    echo "❌ Erreur: $ENCRYPTION_KEY"
-    echo "   Installez cryptography : pip install cryptography"
+    echo "❌ Error: $ENCRYPTION_KEY"
+    echo "   Install cryptography: pip install cryptography"
     exit 1
 fi
-echo "✓ Généré"
+echo "✓ Generated"
 
 # ── [3/7] JWT_SECRET_KEY ──────────────────────────────
-echo "[3/7] Génération JWT_SECRET_KEY..."
+echo "[3/7] Generating JWT_SECRET_KEY..."
 JWT_SECRET_KEY=$($PYTHON_CMD -c "import secrets; print(secrets.token_urlsafe(64))")
-echo "✓ Généré"
+echo "✓ Generated"
 
-# ── [4/7] PKI (certificats médecins) ──────────────────
-echo "[4/7] Génération PKI..."
+# ── [4/7] PKI (doctor certificates) ───────────────────
+echo "[4/7] Generating PKI..."
 
-# Détecter l'OS pour OpenSSL
+# Detect OS for OpenSSL
 if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" ]]; then
     SUBJ_PREFIX="//"
 else
@@ -122,9 +122,9 @@ if command -v openssl &>/dev/null; then
        [ -f "pki/doctors/dr-test-cert.pem" ] && \
        [ -f "pki/doctors/dr-test-key.pem" ] && \
        [ -f "trusted_cas/root-ca-cert.pem" ]; then
-        echo "✓ PKI déjà présente et complète"
+        echo "✓ PKI already present and complete"
     else
-        echo "  Génération de la PKI complète..."
+        echo "  Generating the full PKI..."
         mkdir -p pki/root-ca pki/intermediate-ca pki/doctors trusted_cas
 
         openssl genrsa -out pki/root-ca/root-ca-key.pem 4096 2>/dev/null
@@ -151,70 +151,70 @@ if command -v openssl &>/dev/null; then
           -CA pki/intermediate-ca/int-cert.pem \
           -CAkey pki/intermediate-ca/int-key.pem -CAcreateserial \
           -out pki/doctors/dr-test-cert.pem -days 365 2>/dev/null
-        echo "  ✓ Certificat Dr. Test"
+        echo "  ✓ Dr. Test certificate"
 
         cat pki/doctors/dr-test-cert.pem \
             pki/intermediate-ca/int-cert.pem \
             pki/root-ca/root-ca-cert.pem \
             > pki/doctors/dr-test-fullchain.pem
-        echo "  ✓ Fullchain généré"
+        echo "  ✓ Fullchain generated"
 
         cp pki/root-ca/root-ca-cert.pem trusted_cas/
         cp pki/intermediate-ca/int-cert.pem trusted_cas/
-        echo "  ✓ trusted_cas peuplé"
+        echo "  ✓ trusted_cas populated"
 
-        echo "✓ PKI générée"
+        echo "✓ PKI generated"
     fi
 else
-    echo "⚠️  OpenSSL non trouvé, PKI ignorée"
+    echo "⚠️  OpenSSL not found, PKI skipped"
     mkdir -p trusted_cas
 fi
 
-# ── [5/7] Certificats TLS ─────────────────────────────
-echo "[5/7] Génération certificats TLS..."
+# ── [5/7] TLS certificates ────────────────────────────
+echo "[5/7] Generating TLS certificates..."
 if [ -f "cert.crt" ] && [ -f "cert.key" ]; then
-    echo "✓ Certificats TLS déjà présents"
+    echo "✓ TLS certificates already present"
 elif command -v openssl &>/dev/null; then
     openssl req -x509 -newkey rsa:2048 -nodes \
       -keyout cert.key -out cert.crt -days 365 \
       -subj "${SUBJ_PREFIX}CN=localhost" 2>/dev/null
     chmod 600 cert.key
     chmod 644 cert.crt
-    echo "✓ Certificats TLS générés"
+    echo "✓ TLS certificates generated"
 else
-    echo "⚠️  OpenSSL non trouvé, TLS ignoré"
+    echo "⚠️  OpenSSL not found, TLS skipped"
 fi
 
-# ── [6/7] Keycloak (import automatique) ───────────────
-echo "[6/7] Lancement Keycloak..."
+# ── [6/7] Keycloak (automatic import) ─────────────────
+echo "[6/7] Starting Keycloak..."
 docker compose -f docker-compose.keycloak.yml up -d
 
-echo "Attente Keycloak (peut prendre 30s)..."
+echo "Waiting for Keycloak (can take 30s)..."
 until curl -s "${KC_URL_INTERNAL}/realms/master" >/dev/null 2>&1; do
     sleep 3
     echo -n "."
 done
 echo ""
-echo "✔ Keycloak prêt"
+echo "✔ Keycloak ready"
 
-echo "Attente du realm importé '${REALM}'..."
+echo "Waiting for the imported realm '${REALM}'..."
 until curl -s "${KC_URL_INTERNAL}/realms/${REALM}" >/dev/null 2>&1; do
     sleep 3
     echo -n "."
 done
 echo ""
-echo "✔ Realm '${REALM}' disponible (import auto via --import-realm)"
+echo "✔ Realm '${REALM}' available (auto import via --import-realm)"
 
-# Token admin
+# Admin token
 TOKEN=$(curl -s \
   -X POST "${KC_URL_INTERNAL}/realms/master/protocol/openid-connect/token" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -d "grant_type=password&client_id=admin-cli&username=${ADMIN}&password=${ADMIN_PASS}" \
   | $PYTHON_CMD -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
-echo "✔ Token admin obtenu"
+echo "✔ Admin token obtained"
 
-# Attendre que le client soit disponible après import
-echo "Attente du client '${CLIENT_ID}'..."
+# Wait for the client to be available after import
+echo "Waiting for client '${CLIENT_ID}'..."
 CLIENT_UUID=""
 until [ -n "$CLIENT_UUID" ]; do
     sleep 3
@@ -232,50 +232,66 @@ else:
 " 2>/dev/null) || CLIENT_UUID=""
 done
 echo ""
-echo "✔ Client '${CLIENT_ID}' trouvé"
+echo "✔ Client '${CLIENT_ID}' found"
 
-# Régénérer le secret client (l'import met "**********" comme placeholder)
+# Regenerate the client secret (the import sets "**********" as a placeholder)
 curl -s -X POST \
   -H "Authorization: Bearer $TOKEN" \
   "${KC_URL_INTERNAL}/admin/realms/${REALM}/clients/${CLIENT_UUID}/client-secret" > /dev/null
-echo "✔ Secret client régénéré"
+echo "✔ Client secret regenerated"
 
 CLIENT_SECRET=$(curl -s \
   -H "Authorization: Bearer $TOKEN" \
   "${KC_URL_INTERNAL}/admin/realms/${REALM}/clients/${CLIENT_UUID}/client-secret" \
   | $PYTHON_CMD -c "import sys,json; print(json.load(sys.stdin)['value'])")
-echo "✔ Secret client récupéré"
-echo "✔ Configuration Keycloak importée automatiquement depuis keycloak/import/realm-export.json"
+echo "✔ Client secret retrieved"
+echo "✔ Keycloak configuration automatically imported from keycloak/import/realm-export.json"
 
-# ── Stack ELK (logs) - optionnel ───────────────────────
-# Optionnel car lourd (Elasticsearch/Logstash/Kibana, ~1.5 Go d'images) et pas
-# nécessaire au fonctionnement de l'appli : sans lui, les logs restent quand
-# même écrits dans logs/security.log et logs/django.log.
-read -p "Lancer aussi le stack ELK (logs, Elasticsearch/Logstash/Kibana) ? [y/N] : " ELK_CHOICE
+# ── ELK stack (logs) - optional ────────────────────────
+# Optional because it's heavy (Elasticsearch/Logstash/Kibana, ~1.5 GB of images) and not
+# required for the app to work: without it, logs are still written
+# to logs/security.log and logs/django.log.
+read -p "Also start the ELK stack (logs, Elasticsearch/Logstash/Kibana)? [y/N]: " ELK_CHOICE
 if [[ "$ELK_CHOICE" =~ ^[Yy]$ ]]; then
-    echo "Lancement du stack ELK..."
+    echo "Starting the ELK stack..."
     docker compose -f docker-compose.elk.yml up -d
-    echo "Attente Elasticsearch..."
+    echo "Waiting for Elasticsearch..."
     until curl -s "http://localhost:9200/_cluster/health" >/dev/null 2>&1; do
         sleep 3
         echo -n "."
     done
     echo ""
-    echo "✔ Stack ELK prêt (Kibana : http://localhost:5601)"
+    echo "✔ ELK stack ready"
+
+    echo "Waiting for Kibana..."
+    until curl -s "http://localhost:5601/api/status" | grep -q '"level":"available"'; do
+        sleep 3
+        echo -n "."
+    done
+    echo ""
+    echo "✔ Kibana ready"
+
+    echo "Importing the Kibana data view (django-logs-*)..."
+    curl -s -X POST "http://localhost:5601/api/saved_objects/_import?overwrite=true" \
+      -H "kbn-xsrf: true" \
+      -F "file=@elk/kibana-dataview-import.ndjson" >/dev/null \
+      && echo "✔ Data view 'django-logs-*' imported (visible directly in Kibana Discover)" \
+      || echo "⚠️  Data view import failed (create it manually in Kibana)"
+
     LOGSTASH_ENABLED="True"
 else
-    echo "✓ Stack ELK ignoré (logs disponibles dans logs/security.log et logs/django.log)"
+    echo "✓ ELK stack skipped (logs available in logs/security.log and logs/django.log)"
     LOGSTASH_ENABLED="False"
 fi
 
-# ── [7/7] Génération .env ─────────────────────────────
-echo "[7/7] Génération .env..."
+# ── [7/7] Generating .env ──────────────────────────────
+echo "[7/7] Generating .env..."
 
 RECAPTCHA_PUBLIC_KEY="6LeIxAcTAAAAAJcZVRqyHh71UMIEGNQ_MXjiZKhI"
 RECAPTCHA_PRIVATE_KEY="6LeIxAcTAAAAAGG-vFI1TnRWxMZNFuojJ4WifJWe"
 
 cat > .env << EOF
-# Généré le $(date)
+# Generated on $(date)
 SECRET_KEY=${SECRET_KEY}
 DEBUG=True
 ALLOWED_HOSTS=localhost,127.0.0.1
@@ -302,27 +318,27 @@ LOGSTASH_PORT=5000
 EOF
 
 chmod 600 .env
-echo "✓ .env créé"
+echo "✓ .env created"
 echo ""
 
-# ── Migrations Django ─────────────────────────────────
+# ── Django migrations ──────────────────────────────────
 mkdir -p logs
-$PYTHON_CMD manage.py migrate >/dev/null 2>&1 && echo "✔ Migrations appliquées" || echo "⚠️  Migrations échouées (lance-les manuellement)"
+$PYTHON_CMD manage.py migrate >/dev/null 2>&1 && echo "✔ Migrations applied" || echo "⚠️  Migrations failed (run them manually)"
 
 echo ""
 echo "============================================"
-echo "  ✓ Initialisation terminée !"
+echo "  ✓ Initialization complete!"
 echo "============================================"
 echo ""
-echo "Keycloak Admin : http://localhost:8080/admin  (admin/admin)"
+echo "Keycloak Admin: http://localhost:8080/admin  (admin/admin)"
 if [ "$LOGSTASH_ENABLED" = "True" ]; then
     echo "Kibana (logs)  : http://localhost:5601"
 fi
 echo ""
-echo "Lancer Django :"
+echo "Start Django:"
 echo "  python manage.py runserver"
 echo "  → http://localhost:8000"
 echo ""
-echo "Ou avec TLS :"
+echo "Or with TLS:"
 echo "  python manage.py runserver_plus --cert-file cert.crt"
 echo ""

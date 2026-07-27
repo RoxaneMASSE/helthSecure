@@ -8,8 +8,8 @@ certificates, TLS, CSP + nonces, and an optional ELK logging stack.
 
 | Matricule | Name |
 |-----------|------|
-| 62514     | TO COMPLETE |
-| 63649     | TO COMPLETE |
+| 62514     | Roxane Masse |
+| 63649     | Ines Ben Bouhout |
 
 ## Requirements
 

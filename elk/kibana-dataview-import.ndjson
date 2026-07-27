@@ -1,0 +1,2 @@
+{"attributes":{"title":"django-logs-*","timeFieldName":"@timestamp"},"coreMigrationVersion":"8.13.0","id":"django-logs-star","managed":false,"references":[],"type":"index-pattern","typeMigrationVersion":"8.0.0"}
+{"excludedObjects":[],"excludedObjectsCount":0,"exportedCount":1,"missingRefCount":0,"missingReferences":[]}
