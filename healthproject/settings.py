@@ -85,14 +85,14 @@ DATABASES = {
     }
 }
 
-LANGUAGE_CODE = "fr-be"
+LANGUAGE_CODE = "en-us"
 TIME_ZONE = "Europe/Brussels"
 USE_I18N = True
 USE_TZ = True
 STATIC_URL = "static/"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 KEYCLOAK_URL   = config('KEYCLOAK_URL', default='http://localhost:8080')
-# URL interne directe vers Keycloak (port 8180, bypass Nginx) pour les appels API admin Django
+# Direct internal URL to Keycloak (port 8180, bypasses Nginx) for Django admin API calls
 KEYCLOAK_INTERNAL_URL = config('KEYCLOAK_INTERNAL_URL', default='http://localhost:8180')
 KEYCLOAK_REALM = config('KEYCLOAK_REALM', default='health')
 KEYCLOAK_ADMIN_USER     = config('KEYCLOAK_ADMIN_USER', default='admin')
@@ -128,12 +128,12 @@ RECAPTCHA_PUBLIC_KEY  = config('RECAPTCHA_PUBLIC_KEY')
 RECAPTCHA_PRIVATE_KEY = config('RECAPTCHA_PRIVATE_KEY')
 SILENCED_SYSTEM_CHECKS = ['django_recaptcha.recaptcha_test_key_error']
 
-# ── Logging (connexions, échecs d'authentification, accès fichiers médicaux) ─
+# ── Logging (logins, authentication failures, medical file access) ─
 LOGS_DIR = BASE_DIR / "logs"
 LOGS_DIR.mkdir(exist_ok=True)
 
-# ELK : désactivé par défaut pour ne pas casser le dev si Logstash ne tourne
-# pas (docker-compose.elk.yml). Activer via .env : LOGSTASH_ENABLED=True
+# ELK: disabled by default so it doesn't break dev if Logstash isn't running
+# (docker-compose.elk.yml). Enable via .env: LOGSTASH_ENABLED=True
 LOGSTASH_ENABLED = config('LOGSTASH_ENABLED', default=False, cast=bool)
 LOGSTASH_HOST = config('LOGSTASH_HOST', default='localhost')
 LOGSTASH_PORT = config('LOGSTASH_PORT', default=5000, cast=int)
@@ -203,24 +203,24 @@ if LOGSTASH_ENABLED:
     LOGGING["loggers"]["django"]["handlers"].append("logstash")
 
 # ── Content-Security-Policy (django-csp 4.x) ─────────────────────────────────
-# Les templates Django contiennent du JS inline ; les nonces sont disponibles
-# via {{ CSP_NONCE }} dans les templates (context_processor csp.context_processors.nonce).
-# Pour les <script> inline existants, utiliser nonce="{{ CSP_NONCE }}" sur la balise <script>.
+# Django templates contain inline JS; nonces are available
+# via {{ CSP_NONCE }} in templates (context_processor csp.context_processors.nonce).
+# For existing inline <script> tags, use nonce="{{ CSP_NONCE }}" on the <script> tag.
 CONTENT_SECURITY_POLICY = {
     "DIRECTIVES": {
         "default-src": ["'self'"],
-        # Les templates utilisent du JS inline → autoriser avec nonce
-        # 'unsafe-inline' reste en fallback pour navigateurs anciens (CSP2) ;
-        # les navigateurs supportant les nonces (CSP3) l'ignorent automatiquement des lors qu'un nonce est present.
+        # Templates use inline JS → allow with nonce
+        # 'unsafe-inline' stays as a fallback for older browsers (CSP2);
+        # browsers supporting nonces (CSP3) automatically ignore it once a nonce is present.
         "script-src": ["'self'", NONCE, "'unsafe-inline'", "https://www.google.com", "https://www.gstatic.com"],
-        # Styles inline Django courants
+        # Common Django inline styles
         "style-src": ["'self'", "'unsafe-inline'"],
         "connect-src": ["'self'", "https://www.google.com"],
         "img-src": ["'self'", "data:"],
         "font-src": ["'self'"],
         "frame-src": ["'self'", "https://www.google.com"],
         "frame-ancestors": ["'none'"],
-        # OIDC redirige vers Keycloak
+        # OIDC redirects to Keycloak
         "form-action": ["'self'", config('KEYCLOAK_URL', default='http://localhost:8080')],
     },
 }
