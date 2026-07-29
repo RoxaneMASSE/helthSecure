@@ -1,9 +1,11 @@
+{% load static %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}HealthSecure{% endblock %}</title>
+    {% if user.is_authenticated %}<script src="{% static 'accounts/js/keystore.js' %}"></script>{% endif %}
     {% block extra_head %}{% endblock %}
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -31,7 +33,7 @@
     <div>
         {% if user.is_authenticated %}
             <a href="{% url 'accounts:profil' %}">My profile</a>
-            <a href="{% url 'accounts:logout' %}">Log out</a>
+            <a href="{% url 'accounts:logout' %}" id="logout-link">Log out</a>
         {% else %}
             <a href="{% url 'accounts:register' %}">Register</a>
         {% endif %}
@@ -54,6 +56,16 @@
         if (event.persisted) {
             window.location.reload();
         }
+    });
+
+    // Wipe the RSA private key from IndexedDB before actually logging out,
+    // so it doesn't linger there until the tab/window is closed.
+    document.getElementById('logout-link').addEventListener('click', function (event) {
+        event.preventDefault();
+        var logoutUrl = event.currentTarget.href;
+        window.KeyStore.clearKeys().finally(function () {
+            window.location.href = logoutUrl;
+        });
     });
 </script>
 {% endif %}

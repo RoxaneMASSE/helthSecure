@@ -9,7 +9,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 STATIC_URL = 'static/'
 
 SECRET_KEY = config('SECRET_KEY')
-DEBUG = config('DEBUG', default=True, cast=bool)
+DEBUG = config('DEBUG', default=False, cast=bool)
 ALLOWED_HOSTS = config(
     'ALLOWED_HOSTS',
     default='localhost,127.0.0.1',
@@ -96,11 +96,11 @@ KEYCLOAK_URL   = config('KEYCLOAK_URL', default='http://localhost:8080')
 KEYCLOAK_INTERNAL_URL = config('KEYCLOAK_INTERNAL_URL', default='http://localhost:8180')
 KEYCLOAK_REALM = config('KEYCLOAK_REALM', default='health')
 KEYCLOAK_ADMIN_USER     = config('KEYCLOAK_ADMIN_USER', default='admin')
-KEYCLOAK_ADMIN_PASSWORD = config('KEYCLOAK_ADMIN_PASSWORD', default='admin')
+KEYCLOAK_ADMIN_PASSWORD = config('KEYCLOAK_ADMIN_PASSWORD')
 _BASE = f"{KEYCLOAK_URL}/realms/{KEYCLOAK_REALM}/protocol/openid-connect"
 
 OIDC_RP_CLIENT_ID     = config('OIDC_RP_CLIENT_ID', default='django-health')
-OIDC_RP_CLIENT_SECRET = config('OIDC_RP_CLIENT_SECRET', default='fkXZdfIIpbBvYUofQZF5QJxKkSdr0inh')
+OIDC_RP_CLIENT_SECRET = config('OIDC_RP_CLIENT_SECRET')
 OIDC_RP_SIGN_ALGO     = "RS256"
 OIDC_RP_SCOPES        = "openid email profile"
 
