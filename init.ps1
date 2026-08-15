@@ -130,10 +130,15 @@ if (Get-Command openssl -ErrorAction SilentlyContinue) {
         openssl req -new -key pki\intermediate-ca\int-key.pem `
           -out pki\intermediate-ca\int-csr.pem `
           -subj "/C=BE/O=CHU Bruxelles/CN=CHU CA" 2>$null
+        Set-Content -Path pki\intermediate-ca\int-ext.cnf -Encoding ascii -Value @(
+            "basicConstraints = critical, CA:TRUE, pathlen:0",
+            "keyUsage = critical, keyCertSign, cRLSign"
+        )
         openssl x509 -req -in pki\intermediate-ca\int-csr.pem `
           -CA pki\root-ca\root-ca-cert.pem `
           -CAkey pki\root-ca\root-ca-key.pem -CAcreateserial `
-          -out pki\intermediate-ca\int-cert.pem -days 1825 2>$null
+          -out pki\intermediate-ca\int-cert.pem -days 1825 `
+          -extfile pki\intermediate-ca\int-ext.cnf 2>$null
         Write-Host "  ✓ Intermediate CA"
 
         # Doctor certificate

@@ -137,10 +137,15 @@ if command -v openssl &>/dev/null; then
         openssl req -new -key pki/intermediate-ca/int-key.pem \
           -out pki/intermediate-ca/int-csr.pem \
           -subj "${SUBJ_PREFIX}C=BE/O=CHU Bruxelles/CN=CHU CA" 2>/dev/null
+        cat > pki/intermediate-ca/int-ext.cnf <<'EOF'
+basicConstraints = critical, CA:TRUE, pathlen:0
+keyUsage = critical, keyCertSign, cRLSign
+EOF
         openssl x509 -req -in pki/intermediate-ca/int-csr.pem \
           -CA pki/root-ca/root-ca-cert.pem \
           -CAkey pki/root-ca/root-ca-key.pem -CAcreateserial \
-          -out pki/intermediate-ca/int-cert.pem -days 1825 2>/dev/null
+          -out pki/intermediate-ca/int-cert.pem -days 1825 \
+          -extfile pki/intermediate-ca/int-ext.cnf 2>/dev/null
         echo "  ✓ Intermediate CA"
 
         openssl genrsa -out pki/doctors/dr-test-key.pem 2048 2>/dev/null

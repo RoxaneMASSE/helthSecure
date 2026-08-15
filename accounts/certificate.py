@@ -118,6 +118,7 @@ class CertificateService:
 
         for i in range(len(certs) - 1):
             child, parent = certs[i], certs[i + 1]
+            self._verify_is_ca(parent)
             if not self._verify_signature(child, parent):
                 raise ValidationError(
                     f"Invalid chain: '{self._get_cn(child)}' "
@@ -128,6 +129,30 @@ class CertificateService:
             raise ValidationError(
                 f"Root CA '{self._get_cn(certs[-1])}' is not in the trusted store."
             )
+
+    def _verify_is_ca(self, cert):
+        try:
+            bc = cert.extensions.get_extension_for_class(x509.BasicConstraints)
+        except x509.ExtensionNotFound:
+            raise ValidationError(
+                f"'{self._get_cn(cert)}' has no BasicConstraints extension "
+                "and cannot be trusted as an intermediate/root CA."
+            )
+        if not bc.value.ca:
+            raise ValidationError(
+                f"'{self._get_cn(cert)}' is not a CA certificate (BasicConstraints CA=False) "
+                "and cannot be used to sign other certificates."
+            )
+
+        try:
+            ku = cert.extensions.get_extension_for_class(x509.KeyUsage)
+            if not ku.value.key_cert_sign:
+                raise ValidationError(
+                    f"'{self._get_cn(cert)}' does not have the keyCertSign key usage "
+                    "and cannot be used to sign other certificates."
+                )
+        except x509.ExtensionNotFound:
+            pass
 
     def _verify_signature(self, child, parent):
         try:
