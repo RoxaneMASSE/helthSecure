@@ -119,7 +119,10 @@ def logout_view(request):
 
     params = {
         "client_id": settings.OIDC_RP_CLIENT_ID,
-        "post_logout_redirect_uri": "http://localhost:8000/", # Must match EXACTLY what is configured in Keycloak
+        # Built from the incoming request so it matches the scheme actually in
+        # use (http/https) — Keycloak requires an exact match against one of
+        # its registered post-logout redirect URIs.
+        "post_logout_redirect_uri": request.build_absolute_uri("/"),
     }
 
     if id_token:
