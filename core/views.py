@@ -5,6 +5,7 @@ import logging
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
+from django.db import transaction
 from django.db.models import Q
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -373,23 +374,38 @@ def upload_file(request):
         if len(encrypted_file_bytes) > 10 * 1024 * 1024:
             return JsonResponse({"error": "File too large (max 10 MB)."}, status=400)
 
-        medical_file = MedicalFile.objects.create(
-            patient=request.user,
-            encrypted_file=encrypted_file_bytes,
-            encrypted_filename=encrypted_filename,
-            encrypted_date=encrypted_date,
-            file_iv=file_iv,
-            uploaded_by=request.user,
-            requires_approval=False,
-            approved=True,
-        )
+        # Only the patient and their currently appointed doctors may receive a key share.
+        allowed_user_ids = {request.user.id}
+        try:
+            allowed_user_ids |= set(request.user.patient_profile.doctors.values_list("id", flat=True))
+        except Exception:
+            pass
         for ks_data in key_shares:
-            user = User.objects.get(id=ks_data["user_id"])
-            FileKeyShare.objects.create(
-                file=medical_file,
-                user=user,
-                encrypted_aes_key=ks_data["encrypted_aes_key"],
+            if ks_data["user_id"] not in allowed_user_ids:
+                logger.warning(
+                    "FILE_UPLOAD_INVALID_RECIPIENT user=%s target_user_id=%s",
+                    request.user.email, ks_data["user_id"],
+                )
+                return JsonResponse({"error": "Invalid recipient for key share."}, status=400)
+
+        with transaction.atomic():
+            medical_file = MedicalFile.objects.create(
+                patient=request.user,
+                encrypted_file=encrypted_file_bytes,
+                encrypted_filename=encrypted_filename,
+                encrypted_date=encrypted_date,
+                file_iv=file_iv,
+                uploaded_by=request.user,
+                requires_approval=False,
+                approved=True,
             )
+            for ks_data in key_shares:
+                user = User.objects.get(id=ks_data["user_id"])
+                FileKeyShare.objects.create(
+                    file=medical_file,
+                    user=user,
+                    encrypted_aes_key=ks_data["encrypted_aes_key"],
+                )
         logger.info(
             "FILE_UPLOAD user=%s file_id=%s",
             request.user.email, medical_file.id,
@@ -607,23 +623,38 @@ def doctor_upload_file(request, patient_id):
         if len(encrypted_file_bytes) > 10 * 1024 * 1024:
             return JsonResponse({"error": "File too large (max 10 MB)."}, status=400)
 
-        medical_file = MedicalFile.objects.create(
-            patient=patient,
-            encrypted_file=encrypted_file_bytes,
-            encrypted_filename=encrypted_filename,
-            encrypted_date=encrypted_date,
-            file_iv=file_iv,
-            uploaded_by=request.user,
-            requires_approval=True,
-            approved=False,
-        )
+        # Only the patient and their currently appointed doctors may receive a key share.
+        allowed_user_ids = {patient.id}
+        try:
+            allowed_user_ids |= set(patient.patient_profile.doctors.values_list("id", flat=True))
+        except Exception:
+            pass
         for ks_data in key_shares:
-            user = User.objects.get(id=ks_data["user_id"])
-            FileKeyShare.objects.create(
-                file=medical_file,
-                user=user,
-                encrypted_aes_key=ks_data["encrypted_aes_key"],
+            if ks_data["user_id"] not in allowed_user_ids:
+                logger.warning(
+                    "FILE_UPLOAD_BY_DOCTOR_INVALID_RECIPIENT user=%s patient_id=%s target_user_id=%s",
+                    request.user.email, patient_id, ks_data["user_id"],
+                )
+                return JsonResponse({"error": "Invalid recipient for key share."}, status=400)
+
+        with transaction.atomic():
+            medical_file = MedicalFile.objects.create(
+                patient=patient,
+                encrypted_file=encrypted_file_bytes,
+                encrypted_filename=encrypted_filename,
+                encrypted_date=encrypted_date,
+                file_iv=file_iv,
+                uploaded_by=request.user,
+                requires_approval=True,
+                approved=False,
             )
+            for ks_data in key_shares:
+                user = User.objects.get(id=ks_data["user_id"])
+                FileKeyShare.objects.create(
+                    file=medical_file,
+                    user=user,
+                    encrypted_aes_key=ks_data["encrypted_aes_key"],
+                )
         logger.info(
             "FILE_UPLOAD_BY_DOCTOR user=%s patient_id=%s file_id=%s",
             request.user.email, patient_id, medical_file.id,
@@ -682,11 +713,25 @@ def api_add_file_key_shares(request):
         data = json.loads(request.body)
         shares = data.get("shares", [])
 
+        # Only the patient and their currently appointed doctors may receive a key share.
+        allowed_user_ids = {request.user.id}
+        try:
+            allowed_user_ids |= set(request.user.patient_profile.doctors.values_list("id", flat=True))
+        except Exception:
+            pass
+
         created_count = 0
         for share in shares:
             file_id = share["file_id"]
             user_id = share["user_id"]
             encrypted_aes_key = share["encrypted_aes_key"]
+
+            if user_id not in allowed_user_ids:
+                logger.warning(
+                    "ADD_KEY_SHARE_INVALID_RECIPIENT user=%s target_user_id=%s",
+                    request.user.email, user_id,
+                )
+                return JsonResponse({"error": "Invalid recipient for key share."}, status=400)
 
             # Check that the file belongs to the logged-in patient
             medical_file = get_object_or_404(MedicalFile, id=file_id, patient=request.user)

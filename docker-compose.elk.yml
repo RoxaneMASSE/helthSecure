@@ -34,6 +34,11 @@ services:
       - "5000:5000"   # Django -> Logstash (TCP, logs JSON)
     environment:
       - "LS_JAVA_OPTS=-Xms256m -Xmx256m"
+      # Requis par le filtre "aggregate" (elk/logstash.conf) : son état de
+      # comptage est en mémoire par worker, un seul worker garantit des
+      # compteurs corrects (sinon les événements sont répartis sur plusieurs
+      # threads et les seuils ne sont jamais atteints de façon fiable).
+      - "PIPELINE_WORKERS=1"
     networks:
       - elk_net
 
