@@ -1,6 +1,6 @@
 ﻿# init.ps1 - Full initialization of the HealthSecure project
 # Generates all Django secrets + configures Keycloak automatically
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Continue"
 
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "  HealthSecure - Full initialization"        -ForegroundColor Cyan
@@ -13,7 +13,7 @@ $KC_URL_INTERNAL = "http://localhost:8180"   # Direct internal URL (bypass Nginx
 $REALM     = "health"
 $CLIENT_ID = "django-health"
 $ADMIN     = "admin"
-$ADMIN_PASS= "admin"
+$ADMIN_PASS = & { $p = openssl rand -hex 24 2>$null; if ($p) { $p } else { "admin" } }
 
 # ── Check if .env already exists ───────────────────────
 if (Test-Path ".env") {
@@ -185,6 +185,12 @@ if ((Test-Path "cert.crt") -and (Test-Path "cert.key")) {
 
 # ── [6/7] Keycloak (automatic import) ─────────────────
 Write-Host "[6/7] Starting Keycloak..."
+# The keycloak_data volume persists the admin user created on first boot.
+# Since ADMIN_PASS is regenerated on every run, the volume must be wiped
+# each time, otherwise Keycloak keeps the old password and the admin
+# login below fails.
+$env:KEYCLOAK_ADMIN_PASSWORD = $ADMIN_PASS
+docker compose -f docker-compose.keycloak.yml down -v
 docker compose -f docker-compose.keycloak.yml up -d
 
 Write-Host "Waiting for Keycloak (can take 30s)..." -NoNewline
@@ -219,6 +225,10 @@ $tokenResp  = Invoke-RestMethod -Method Post `
   -ContentType "application/x-www-form-urlencoded" `
   -Body $tokenBody
 $TOKEN = $tokenResp.access_token
+if (-not $TOKEN) {
+    Write-Host "❌ Failed to obtain admin token" -ForegroundColor Red
+    exit 1
+}
 Write-Host "✔ Admin token obtained" -ForegroundColor Green
 
 $headers = @{ Authorization = "Bearer $TOKEN"; "Content-Type" = "application/json" }
