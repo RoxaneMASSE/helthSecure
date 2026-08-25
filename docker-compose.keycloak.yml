@@ -5,8 +5,8 @@ services:
     image: quay.io/keycloak/keycloak:latest
     container_name: keycloak
     environment:
-      KEYCLOAK_ADMIN: admin
-      KEYCLOAK_ADMIN_PASSWORD: admin
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN_USER:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?KEYCLOAK_ADMIN_PASSWORD must be set in .env}
     # Port 8080 n'est plus exposé vers l'hôte (accès uniquement via Nginx ou le port interne)
     # Port 8180 → accès direct interne pour Django et les scripts init (contourne Nginx)
     ports:

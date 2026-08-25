@@ -122,7 +122,9 @@ if (Get-Command openssl -ErrorAction SilentlyContinue) {
         openssl genrsa -out pki\root-ca\root-ca-key.pem 4096 2>$null
         openssl req -x509 -new -key pki\root-ca\root-ca-key.pem `
           -out pki\root-ca\root-ca-cert.pem -days 3650 `
-          -subj "/C=BE/O=Medical Root CA/CN=Root CA" 2>$null
+          -subj "/C=BE/O=Medical Root CA/CN=Root CA" `
+          -addext "basicConstraints=critical,CA:TRUE" `
+          -addext "keyUsage=critical,keyCertSign,cRLSign" 2>$null
         Write-Host "  ✓ Root CA"
 
         # Intermediate CA

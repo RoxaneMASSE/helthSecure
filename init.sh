@@ -15,7 +15,8 @@ KC_URL_INTERNAL="http://localhost:8180" # Direct internal URL (bypass Nginx) →
 REALM="health"
 CLIENT_ID="django-health"
 ADMIN="admin"
-ADMIN_PASS="admin"
+ADMIN_PASS=$(openssl rand -hex 24 2>/dev/null || echo "admin")
+
 
 # ── Check if .env already exists ───────────────────────
 if [ -f ".env" ]; then
@@ -125,12 +126,15 @@ if command -v openssl &>/dev/null; then
         echo "✓ PKI already present and complete"
     else
         echo "  Generating the full PKI..."
+        export OPENSSL_CONF=/dev/null
         mkdir -p pki/root-ca pki/intermediate-ca pki/doctors trusted_cas
 
         openssl genrsa -out pki/root-ca/root-ca-key.pem 4096 2>/dev/null
         openssl req -x509 -new -key pki/root-ca/root-ca-key.pem \
           -out pki/root-ca/root-ca-cert.pem -days 3650 \
-          -subj "${SUBJ_PREFIX}C=BE/O=Medical Root CA/CN=Root CA" 2>/dev/null
+          -subj "${SUBJ_PREFIX}C=BE/O=Medical Root CA/CN=Root CA" \
+          -addext "basicConstraints=critical,CA:TRUE" \
+          -addext "keyUsage=critical,keyCertSign,cRLSign" 2>/dev/null
         echo "  ✓ Root CA"
 
         openssl genrsa -out pki/intermediate-ca/int-key.pem 4096 2>/dev/null
@@ -192,7 +196,13 @@ fi
 
 # ── [6/7] Keycloak (automatic import) ─────────────────
 echo "[6/7] Starting Keycloak..."
-docker compose -f docker-compose.keycloak.yml up -d
+# The keycloak_data volume persists the admin user created on first boot.
+# Since ADMIN_PASS is regenerated on every run, the volume must be wiped
+# each time, otherwise Keycloak keeps the old password and the admin
+# login below fails.
+docker compose -f docker-compose.keycloak.yml down -v 2>/dev/null || true
+KEYCLOAK_ADMIN_PASSWORD="$ADMIN_PASS" docker compose -f docker-compose.keycloak.yml up -d
+
 
 echo "Waiting for Keycloak (can take 30s)..."
 until curl -s "${KC_URL_INTERNAL}/realms/master" >/dev/null 2>&1; do
