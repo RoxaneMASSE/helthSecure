@@ -72,11 +72,6 @@ To run with TLS (self-signed certificate generated during installation):
 python manage.py runserver_plus --cert-file cert.crt
 ```
 
-### Keycloak access
-
-- Keycloak admin console: http://localhost:8080/admin (`admin` / `admin`)
-- Application realm: `health`
-
 ### ELK logging stack (optional)
 
 If started during installation:
