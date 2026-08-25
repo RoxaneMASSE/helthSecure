@@ -230,7 +230,7 @@ def request_patient(request):
         return redirect("core:my_patients")
 
     patient = get_object_or_404(User.objects.select_related("userprofile"), id=patient_id, userprofile__role="patient")
-    if request.user.patients.filter(id=patient.id).exists():
+    if patient.patient_profile.doctors.filter(id=request.user.id).exists():
         messages.info(request, "You already follow this patient.")
         return redirect("core:my_patients")
 
@@ -713,12 +713,15 @@ def api_add_file_key_shares(request):
         data = json.loads(request.body)
         shares = data.get("shares", [])
 
-        # Only the patient and their currently appointed doctors may receive a key share.
+        # Only the patient and legitimate doctor accounts may receive a key share.
+        # (Not restricted to *already appointed* doctors: this endpoint is also called
+        # while approving/adding a doctor, i.e. before the appointment is committed
+        # server-side, so the newly-added doctor is not yet in patient_profile.doctors.)
+        from accounts.models import UserProfile
         allowed_user_ids = {request.user.id}
-        try:
-            allowed_user_ids |= set(request.user.patient_profile.doctors.values_list("id", flat=True))
-        except Exception:
-            pass
+        allowed_user_ids |= set(
+            UserProfile.objects.filter(role="doctor").values_list("user_id", flat=True)
+        )
 
         created_count = 0
         for share in shares:
