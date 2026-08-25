@@ -1,13 +1,5 @@
 version: '3.8'
 
-# ELK Stack (Elasticsearch, Logstash, Kibana) pour la centralisation des logs
-# de sécurité de l'application (connexions, échecs d'authentification, accès
-# aux fichiers médicaux). Django envoie les logs directement à Logstash en TCP
-# (voir healthproject/settings.py, handler "logstash"), qui les transmet à
-# Elasticsearch. Kibana sert à les visualiser.
-#
-# Lancement : docker compose -f docker-compose.elk.yml up -d
-
 services:
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.13.0
@@ -34,10 +26,6 @@ services:
       - "5000:5000"   # Django -> Logstash (TCP, logs JSON)
     environment:
       - "LS_JAVA_OPTS=-Xms256m -Xmx256m"
-      # Requis par le filtre "aggregate" (elk/logstash.conf) : son état de
-      # comptage est en mémoire par worker, un seul worker garantit des
-      # compteurs corrects (sinon les événements sont répartis sur plusieurs
-      # threads et les seuils ne sont jamais atteints de façon fiable).
       - "PIPELINE_WORKERS=1"
     networks:
       - elk_net
